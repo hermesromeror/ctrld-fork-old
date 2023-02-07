@@ -12,7 +12,6 @@ builds:
     goos:
       - linux
       - windows
-      - darwin
     goarch:
       - 386
       - arm
@@ -26,21 +25,6 @@ builds:
     gomips:
       - softfloat
     main: ./cmd/ctrld
-  - id: ctrld-darwin
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w
-    goos:
-      - darwin
-    goarch:
-      - amd64
-      - arm64
-    main: ./cmd/ctrld
-    hooks:
-      post: gon gon.hcl
 archives:
   - format_overrides:
       - goos: windows

@@ -73,6 +73,23 @@ func (p *prog) newWebServer() (*webServer, error) {
 	return ws, nil
 }
 
+func (ws *webServer) isAuthorized(r *http.Request) bool {
+	if ws.token == "" {
+		return true
+	}
+	reqToken := r.Header.Get("X-Auth-Token")
+	if reqToken == "" {
+		authHdr := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHdr, "Bearer ") {
+			reqToken = strings.TrimPrefix(authHdr, "Bearer ")
+		}
+	}
+	if reqToken == "" {
+		reqToken = r.URL.Query().Get("token")
+	}
+	return reqToken != "" && reqToken == ws.token
+}
+
 func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set CORS headers for local LAN admin tools
@@ -85,21 +102,20 @@ func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if ws.token != "" {
-			reqToken := r.Header.Get("X-Auth-Token")
-			if reqToken == "" {
-				authHdr := r.Header.Get("Authorization")
-				if strings.HasPrefix(authHdr, "Bearer ") {
-					reqToken = strings.TrimPrefix(authHdr, "Bearer ")
+		// Mutating / administrative endpoints strictly require token if ws.token is configured
+		adminEndpoints := []string{"/api/config-save", "/api/restart", "/api/flush-cache"}
+		for _, ep := range adminEndpoints {
+			if r.URL.Path == ep {
+				if !ws.isAuthorized(r) {
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					w.WriteHeader(http.StatusUnauthorized)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"status":  "error",
+						"message": "Admin authorization token required or invalid",
+					})
+					return
 				}
-			}
-			if reqToken == "" {
-				reqToken = r.URL.Query().Get("token")
-			}
-
-			if reqToken != ws.token {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
+				break
 			}
 		}
 
@@ -152,18 +168,20 @@ func (ws *webServer) registerRoutes() {
 		}
 
 		status := map[string]any{
-			"version":       curVersion(),
-			"pid":           os.Getpid(),
-			"uptime_sec":    int64(uptime.Seconds()),
-			"uptime_str":    fmt.Sprintf("%dh %dm", hours, mins),
-			"go_os":         runtime.GOOS,
-			"go_arch":       runtime.GOARCH,
-			"num_goroutine": runtime.NumGoroutine(),
-			"mem_rss_mb":    rssMB,
-			"mem_alloc_mb":  float64(m.Alloc) / (1024 * 1024),
-			"mem_sys_mb":    float64(m.Sys) / (1024 * 1024),
-			"cache_items":   cacheItems,
-			"cache_size":    ws.p.cfg.Service.CacheSize,
+			"version":         curVersion(),
+			"pid":             os.Getpid(),
+			"uptime_sec":      int64(uptime.Seconds()),
+			"uptime_str":      fmt.Sprintf("%dh %dm", hours, mins),
+			"go_os":           runtime.GOOS,
+			"go_arch":         runtime.GOARCH,
+			"num_goroutine":   runtime.NumGoroutine(),
+			"mem_rss_mb":      rssMB,
+			"mem_alloc_mb":    float64(m.Alloc) / (1024 * 1024),
+			"mem_sys_mb":      float64(m.Sys) / (1024 * 1024),
+			"cache_items":     cacheItems,
+			"cache_size":      ws.p.cfg.Service.CacheSize,
+			"auth_configured": ws.token != "",
+			"is_admin":        ws.isAuthorized(r),
 			"active_upstream": map[string]any{
 				"name":     activeUpstreamName,
 				"type":     strings.ToUpper(activeUpstreamType),
@@ -244,6 +262,49 @@ func (ws *webServer) registerRoutes() {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":  "ok",
 			"message": "DNS cache purged successfully",
+		})
+	})
+
+	// POST /api/verify-token
+	ws.mux.HandleFunc("/api/verify-token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"status":"error","message":"Method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Token string `json:"token"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		token := req.Token
+		if token == "" {
+			token = r.Header.Get("X-Auth-Token")
+		}
+		if token == "" {
+			authHdr := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHdr, "Bearer ") {
+				token = strings.TrimPrefix(authHdr, "Bearer ")
+			}
+		}
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+
+		if ws.token == "" || (token != "" && token == ws.token) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"valid":           true,
+				"auth_configured": ws.token != "",
+				"message":         "Token verified successfully",
+			})
+			return
+		}
+
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"valid":           false,
+			"auth_configured": true,
+			"message":         "Invalid authentication token",
 		})
 	})
 

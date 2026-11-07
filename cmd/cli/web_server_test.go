@@ -197,29 +197,62 @@ func TestWebAuthToken(t *testing.T) {
 	ws, _ := p.newWebServer()
 	handler := ws.authMiddleware(ws.mux)
 
-	// Unauthorized request
+	// Read-only endpoint is accessible without token, but reports is_admin=false
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 Unauthorized without token, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for read-only /api/status without token, got %d", rec.Code)
+	}
+	var st map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if st["is_admin"] != false {
+		t.Errorf("expected is_admin=false without token, got %v", st["is_admin"])
 	}
 
-	// Authorized via header
+	// Read-only endpoint with token reports is_admin=true
 	req = httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	req.Header.Set("X-Auth-Token", "secret123")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK with valid X-Auth-Token, got %d", rec.Code)
+		t.Errorf("expected 200 OK for /api/status with token, got %d", rec.Code)
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if st["is_admin"] != true {
+		t.Errorf("expected is_admin=true with valid token, got %v", st["is_admin"])
 	}
 
-	// Authorized via query param
-	req = httptest.NewRequest(http.MethodGet, "/api/status?token=secret123", nil)
+	// Protected admin endpoint (/api/restart) without token -> 401
+	req = httptest.NewRequest(http.MethodPost, "/api/restart", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for /api/restart without token, got %d", rec.Code)
+	}
+
+	// Protected admin endpoint (/api/restart) with valid token -> 200
+	req = httptest.NewRequest(http.MethodPost, "/api/restart", nil)
+	req.Header.Set("X-Auth-Token", "secret123")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK with valid ?token=, got %d", rec.Code)
+		t.Errorf("expected 200 OK for /api/restart with valid token, got %d", rec.Code)
+	}
+
+	// Verify token endpoint
+	req = httptest.NewRequest(http.MethodPost, "/api/verify-token", strings.NewReader(`{"token":"wrong"}`))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for wrong token, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/verify-token", strings.NewReader(`{"token":"secret123"}`))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for correct token, got %d", rec.Code)
 	}
 }
 

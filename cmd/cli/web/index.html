@@ -255,6 +255,42 @@
       border-color: rgba(59, 130, 246, 0.4);
       font-weight: 700;
     }
+    .domain-test-link {
+      color: var(--foreground);
+      text-decoration: underline dotted;
+      text-underline-offset: 2px;
+      cursor: pointer;
+      transition: color 0.15s ease;
+    }
+    .domain-test-link:hover {
+      color: #60a5fa !important;
+      text-decoration: underline !important;
+    }
+    .stat-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--card-border);
+      font-size: 11px;
+      cursor: pointer;
+      max-width: 100%;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .stat-chip:hover {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: #60a5fa;
+      color: #fff;
+    }
+    .stat-chip-count {
+      font-size: 10px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-weight: 700;
+    }
     .search-input {
       background: #070a11;
       border: 1px solid var(--card-border);
@@ -570,16 +606,48 @@
     <div class="tab-item" id="tab-upstreams" onclick="switchTab('upstreams')">Upstream Chain</div>
     <div class="tab-item" id="tab-tester" onclick="switchTab('tester')">Live DNS Resolver</div>
     <div class="tab-item" id="tab-config" onclick="switchTab('config')">Configuration (TOML)</div>
+    <div class="tab-item" id="tab-logs" onclick="switchTab('logs')">System Logs</div>
   </div>
 
   <!-- TAB 1: Live Feed -->
   <div id="view-feed" class="tab-view active">
+    <!-- Top Talkers & Live Stats Widget -->
+    <div id="top-talkers-bar" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:10px; margin-bottom:12px;">
+      <div class="card" style="padding:10px 12px; margin-bottom:0; background:rgba(30, 41, 59, 0.4); border:1px solid var(--card-border);">
+        <div style="font-size:11px; font-weight:700; color:var(--muted-foreground); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+          <span>Top Active Devices</span>
+          <span style="font-size:10px; color:#60a5fa; cursor:pointer;" onclick="filterByTerm('')">Reset</span>
+        </div>
+        <div id="top-devices-list" style="display:flex; flex-wrap:wrap; gap:4px; min-height:22px;">
+          <span style="color:var(--muted-foreground); font-size:11px;">Listening for traffic...</span>
+        </div>
+      </div>
+      <div class="card" style="padding:10px 12px; margin-bottom:0; background:rgba(30, 41, 59, 0.4); border:1px solid var(--card-border);">
+        <div style="font-size:11px; font-weight:700; color:var(--muted-foreground); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+          <span>Top Blocked Domains</span>
+          <span style="font-size:10px; color:#ef4444; cursor:pointer;" onclick="setStatusFilter('blocked')">View All</span>
+        </div>
+        <div id="top-blocked-list" style="display:flex; flex-wrap:wrap; gap:4px; min-height:22px;">
+          <span style="color:var(--muted-foreground); font-size:11px;">No blocked queries yet</span>
+        </div>
+      </div>
+      <div class="card" style="padding:10px 12px; margin-bottom:0; background:rgba(30, 41, 59, 0.4); border:1px solid var(--card-border);">
+        <div style="font-size:11px; font-weight:700; color:var(--muted-foreground); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+          <span>Top Allowed Domains</span>
+          <span style="font-size:10px; color:#22c55e; cursor:pointer;" onclick="setStatusFilter('allowed')">View All</span>
+        </div>
+        <div id="top-allowed-list" style="display:flex; flex-wrap:wrap; gap:4px; min-height:22px;">
+          <span style="color:var(--muted-foreground); font-size:11px;">Listening for traffic...</span>
+        </div>
+      </div>
+    </div>
+
     <div class="feed-controls">
       <div class="filter-group">
         <button class="btn-filter active" id="flt-all" onclick="setStatusFilter('all')">All</button>
-        <button class="btn-filter" id="flt-blocked" onclick="setStatusFilter('blocked')">Blocked</button>
-        <button class="btn-filter" id="flt-allowed" onclick="setStatusFilter('allowed')">Allowed</button>
-        <button class="btn-filter" id="flt-cached" onclick="setStatusFilter('cached')">Cached</button>
+        <button class="btn-filter" id="flt-blocked" onclick="setStatusFilter('blocked')"><span style="color:#ef4444;">✖</span> Blocked</button>
+        <button class="btn-filter" id="flt-allowed" onclick="setStatusFilter('allowed')"><span style="color:#22c55e;">✔</span> Allowed</button>
+        <button class="btn-filter" id="flt-cached" onclick="setStatusFilter('cached')"><span style="color:#a855f7;">⚡</span> Cached</button>
         
         <select id="dev-filter" onchange="filterFeed()" style="background:#1f2937; border:1px solid var(--card-border); color:var(--foreground); padding:5px 8px; border-radius:6px; font-size:11px; outline:none;">
           <option value="all">All devices</option>
@@ -593,6 +661,9 @@
         </button>
         <button onclick="clearTable()" style="padding:5px 10px; font-size:11px;">
           <span>🗑</span> Clear
+        </button>
+        <button onclick="exportQueriesCSV()" style="padding:5px 10px; font-size:11px;">
+          <span>📥</span> Export CSV
         </button>
       </div>
     </div>
@@ -634,11 +705,27 @@
 
   <!-- TAB 2: Upstream Chain -->
   <div id="view-upstreams" class="tab-view">
-    <div style="margin-bottom:14px;">
-      <h3 style="font-size:14px; font-weight:700;">Multi-Tier Upstream Resolver Topology</h3>
-      <p style="font-size:12px; color:var(--muted-foreground); margin-top:2px;">
-        Failover chain configured in <code>/data/controld/ctrld.toml</code>. Primary queries go to NextDNS; automatic fallback engages if primary fails.
-      </p>
+    <div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h3 style="font-size:14px; font-weight:700;">Multi-Tier Upstream Resolver Topology</h3>
+        <p style="font-size:12px; color:var(--muted-foreground); margin-top:2px;">
+          Failover chain configured in <code>/data/controld/ctrld.toml</code>. Primary queries go to NextDNS; automatic fallback engages if primary fails.
+        </p>
+      </div>
+      <button onclick="runNextDnsDiag()" id="btn-nextdns-diag" style="padding:6px 14px; font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+        <span>⚡</span> Run NextDNS Live Diagnostic
+      </button>
+    </div>
+
+    <!-- NextDNS Diagnostic Card -->
+    <div id="nextdns-diag-card" style="display:none; margin-bottom:16px; padding:12px 14px; border-radius:8px; background:rgba(30, 41, 59, 0.5); border:1px solid rgba(59, 130, 246, 0.3);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-size:12px; font-weight:700; color:#93c5fd; display:flex; align-items:center; gap:6px;">
+          <span>🌐</span> NextDNS Official Diagnostic (<code>test.nextdns.io</code>)
+        </span>
+        <span id="nextdns-diag-time" style="font-size:11px; color:var(--muted-foreground);"></span>
+      </div>
+      <div id="nextdns-diag-body" style="font-size:12px;"></div>
     </div>
 
     <div id="upstreams-list">
@@ -704,6 +791,43 @@
       <span>💡 When saving, <code>ctrld</code> automatically validates TOML syntax, creates a timestamped backup (<code>.bak.timestamp</code>) in <code>/data/controld/</code>, and hot-reloads configuration without network interruption.</span>
       <span id="backup-notice" style="color:#60a5fa; font-family:ui-monospace, monospace;"></span>
     </div>
+  </div>
+
+  <!-- TAB 5: System Logs -->
+  <div id="view-logs" class="tab-view">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+      <div>
+        <h3 style="font-size:14px; font-weight:700;">System Logs (/data/controld/ctrld.log)</h3>
+        <p style="font-size:12px; color:var(--muted-foreground); margin-top:2px;" id="logs-file-info">
+          Live tail buffer of internal service log (bounded memory seek, max 256 KB).
+        </p>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <label style="font-size:11px; color:var(--muted-foreground); display:flex; align-items:center; gap:4px;">
+          Lines:
+          <select id="logs-line-count" onchange="loadSystemLogs()" style="background:#1f2937; border:1px solid var(--card-border); color:var(--foreground); padding:4px 8px; border-radius:6px; font-size:11px; outline:none;">
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="150" selected>150</option>
+            <option value="250">250</option>
+            <option value="500">500</option>
+          </select>
+        </label>
+        <input type="text" id="logs-filter-input" placeholder="Filter logs..." oninput="filterLogsView()" style="background:#070a11; border:1px solid var(--card-border); color:#fff; padding:4px 8px; border-radius:6px; font-size:11px; outline:none; width:140px;">
+        <label style="font-size:11px; color:var(--muted-foreground); display:flex; align-items:center; gap:4px; cursor:pointer;">
+          <input type="checkbox" id="logs-auto-scroll" checked> Auto-scroll
+        </label>
+        <button onclick="toggleLogsAutoRefresh()" id="btn-logs-autorefresh" style="padding:5px 10px; font-size:11px;">
+          <span>⏱</span> Auto-refresh: Off
+        </button>
+        <button onclick="loadSystemLogs()" id="btn-refresh-logs" class="primary" style="padding:5px 12px; font-size:11px;">
+          <span>🔄</span> Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Log Terminal Box -->
+    <pre id="logs-terminal" style="background:#030712; color:#e2e8f0; font-family:ui-monospace, monospace; font-size:11.5px; padding:12px 14px; border-radius:8px; border:1px solid var(--card-border); max-height:min(550px, 75vh); overflow-y:auto; white-space:pre-wrap; word-break:break-all; line-height:1.45;"></pre>
   </div>
 
 </div>
@@ -870,6 +994,10 @@
   }
 
   async function logout() {
+    if (logsAutoRefreshInterval) {
+      clearInterval(logsAutoRefreshInterval);
+      logsAutoRefreshInterval = null;
+    }
     try {
       await fetch('/api/logout', { method: 'POST' });
     } catch(e) {}
@@ -878,7 +1006,7 @@
   }
 
   function switchTab(tabId) {
-    ['feed', 'upstreams', 'tester', 'config'].forEach(t => {
+    ['feed', 'upstreams', 'tester', 'config', 'logs'].forEach(t => {
       document.getElementById('view-' + t).classList.remove('active');
       document.getElementById('tab-' + t).classList.remove('active');
     });
@@ -887,6 +1015,7 @@
 
     if (tabId === 'config') loadConfigRaw();
     if (tabId === 'upstreams') loadUpstreams();
+    if (tabId === 'logs') loadSystemLogs();
   }
 
   function setStatusFilter(filter) {
@@ -948,7 +1077,7 @@
       <td style="color:var(--muted-foreground);">${esc(ev.time)}</td>
       <td title="${esc(devTitle)}"><div class="cell-clip" style="font-weight:600; color:var(--foreground);">${esc(devName)}</div>${devIP ? `<div class="cell-clip dev-ip" style="color:var(--muted-foreground);">${esc(devIP)}</div>` : ''}</td>
       <td style="color:#60a5fa;">${esc(ev.type || 'A')}</td>
-      <td class="cell-clip" style="font-weight:600; color:var(--foreground);" title="${esc(ev.domain)}">${esc(ev.domain)}</td>
+      <td class="cell-clip" style="font-weight:600; color:var(--foreground);" title="${esc(ev.domain)}"><span onclick="testDomainInResolver(this.getAttribute('data-domain'))" data-domain="${esc(ev.domain)}" class="domain-test-link" title="Click to test in Live DNS Resolver">${esc(ev.domain)}</span></td>
       <td class="cell-clip"><span class="status-badge ${badgeClass}">${esc(statusText)}</span></td>
       <td style="text-align:right; font-weight:600; color:${latColor};">${lat} ms</td>
     `;
@@ -968,6 +1097,8 @@
 
     allEvents.unshift(ev);
     if (allEvents.length > 500) allEvents.pop();
+
+    updateTopTalkers();
 
     if (isPaused) return;
 
@@ -998,6 +1129,7 @@
   function clearTable() {
     allEvents = [];
     document.getElementById('feed-tbody').innerHTML = '';
+    updateTopTalkers();
     showToast('Local history cleared');
   }
 
@@ -1353,7 +1485,282 @@
           addQuery(list[i]);
         }
       }
+      updateTopTalkers();
     } catch(e) {}
+  }
+
+  function testDomainInResolver(domain) {
+    if (!domain) return;
+    switchTab('tester');
+    const input = document.getElementById('test-domain-input');
+    if (input) {
+      input.value = domain;
+    }
+    runDnsTest();
+  }
+
+  function updateTopTalkers() {
+    const devCounts = {};
+    const blockedCounts = {};
+    const allowedCounts = {};
+
+    for (const ev of allEvents) {
+      const dev = ev.client_dev || ev.client_ip || 'Router';
+      devCounts[dev] = (devCounts[dev] || 0) + 1;
+
+      if (ev.blocked) {
+        blockedCounts[ev.domain] = (blockedCounts[ev.domain] || 0) + 1;
+      } else {
+        allowedCounts[ev.domain] = (allowedCounts[ev.domain] || 0) + 1;
+      }
+    }
+
+    const sortTop5 = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+    const topDevs = sortTop5(devCounts);
+    const topBlocked = sortTop5(blockedCounts);
+    const topAllowed = sortTop5(allowedCounts);
+
+    const devEl = document.getElementById('top-devices-list');
+    if (devEl) {
+      if (!topDevs.length) {
+        devEl.innerHTML = '<span style="color:var(--muted-foreground); font-size:11px;">Listening for traffic...</span>';
+      } else {
+        devEl.innerHTML = topDevs.map(([dev, count]) => `
+          <div class="stat-chip" onclick="filterByTerm(this.getAttribute('data-val'))" data-val="${esc(dev)}" title="Filter by ${esc(dev)} (${count} queries)">
+            <span class="cell-clip" style="max-width:140px;">${esc(dev)}</span>
+            <span class="stat-chip-count" style="background:rgba(96,165,250,0.2); color:#93c5fd;">${count}</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    const blkEl = document.getElementById('top-blocked-list');
+    if (blkEl) {
+      if (!topBlocked.length) {
+        blkEl.innerHTML = '<span style="color:var(--muted-foreground); font-size:11px;">No blocked queries yet</span>';
+      } else {
+        blkEl.innerHTML = topBlocked.map(([dom, count]) => `
+          <div class="stat-chip" onclick="filterByTerm(this.getAttribute('data-val'))" data-val="${esc(dom)}" title="Filter by ${esc(dom)} (${count} blocks)">
+            <span class="cell-clip" style="max-width:150px;">${esc(dom)}</span>
+            <span class="stat-chip-count" style="background:rgba(239,68,68,0.2); color:#f87171;">${count}</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    const allowEl = document.getElementById('top-allowed-list');
+    if (allowEl) {
+      if (!topAllowed.length) {
+        allowEl.innerHTML = '<span style="color:var(--muted-foreground); font-size:11px;">Listening for traffic...</span>';
+      } else {
+        allowEl.innerHTML = topAllowed.map(([dom, count]) => `
+          <div class="stat-chip" onclick="filterByTerm(this.getAttribute('data-val'))" data-val="${esc(dom)}" title="Filter by ${esc(dom)} (${count} queries)">
+            <span class="cell-clip" style="max-width:150px;">${esc(dom)}</span>
+            <span class="stat-chip-count" style="background:rgba(34,197,94,0.2); color:#86efac;">${count}</span>
+          </div>
+        `).join('');
+      }
+    }
+  }
+
+  function filterByTerm(term) {
+    const input = document.getElementById('query-search');
+    if (input) input.value = term;
+    filterFeed();
+  }
+
+  function exportQueriesCSV() {
+    if (!allEvents || !allEvents.length) {
+      showToast('No queries in memory to export');
+      return;
+    }
+
+    const headers = ['Time', 'Client Device', 'Client IP', 'Query Type', 'Domain', 'Status', 'Upstream', 'Latency (ms)', 'Blocked'];
+    const csvEscape = v => '"' + String(v === undefined || v === null ? '' : v).replace(/"/g, '""') + '"';
+
+    const rows = [headers.join(',')];
+    for (const ev of allEvents) {
+      rows.push([
+        csvEscape(ev.time),
+        csvEscape(ev.client_dev),
+        csvEscape(ev.client_ip),
+        csvEscape(ev.type || 'A'),
+        csvEscape(ev.domain),
+        csvEscape(ev.status),
+        csvEscape(ev.upstream),
+        csvEscape(ev.latency_ms),
+        csvEscape(ev.blocked ? 'YES' : 'NO')
+      ].join(','));
+    }
+
+    const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const filename = `ctrld-queries-${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.csv`;
+
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+
+    showToast(`Exported ${allEvents.length} queries to CSV`);
+  }
+
+  async function runNextDnsDiag() {
+    const btn = document.getElementById('btn-nextdns-diag');
+    const card = document.getElementById('nextdns-diag-card');
+    const body = document.getElementById('nextdns-diag-body');
+    const timeEl = document.getElementById('nextdns-diag-time');
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ Testing test.nextdns.io...</span>';
+    }
+    card.style.display = 'block';
+    body.innerHTML = '<span style="color:var(--muted-foreground);">Querying https://test.nextdns.io from Firewalla Gold...</span>';
+
+    try {
+      const res = await fetch('/api/nextdns-diag');
+      if (res.status === 401) {
+        showLogin();
+        return;
+      }
+      const data = await res.json();
+      timeEl.innerText = 'Run at: ' + new Date().toLocaleTimeString();
+
+      if (data.status === 'ok') {
+        body.innerHTML = `
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-top:6px;">
+            <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
+              <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">Protocol</div>
+              <div style="font-weight:700; color:#34d399; font-size:13px; margin-top:2px;">${esc(data.protocol || 'DOH3')}</div>
+            </div>
+            <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
+              <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">PoP / Server</div>
+              <div style="font-weight:700; color:#60a5fa; font-size:13px; margin-top:2px;">${esc(data.server || 'anexia-atl-1')}</div>
+            </div>
+            <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
+              <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">Profile ID</div>
+              <div style="font-weight:700; color:var(--foreground); font-family:monospace; font-size:12px; margin-top:2px;">${esc(data.profile || 'Default')}</div>
+            </div>
+            <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
+              <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">Client WAN IP</div>
+              <div style="font-weight:600; color:var(--foreground); font-size:12px; margin-top:2px;">${esc(data.client || '-')}</div>
+            </div>
+            <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
+              <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">Destination IP</div>
+              <div style="font-weight:600; color:var(--foreground); font-size:12px; margin-top:2px;">${esc(data.destIP || '-')}${data.anycast ? ' (Anycast)' : ''}</div>
+            </div>
+            <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
+              <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">Device Name</div>
+              <div style="font-weight:700; color:#a855f7; font-size:13px; margin-top:2px;">${esc(data.deviceName || 'Firewalla')}</div>
+            </div>
+          </div>
+        `;
+      } else {
+        body.innerHTML = `
+          <div style="color:#f87171; padding:6px 0;">
+            <strong>Diagnostic Error:</strong> ${esc(data.error || 'Failed to connect')}
+          </div>
+        `;
+      }
+    } catch(err) {
+      body.innerHTML = `<div style="color:#f87171;">Diagnostic request failed: ${esc(err.message)}</div>`;
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>⚡</span> Run NextDNS Live Diagnostic';
+      }
+    }
+  }
+
+  let allLogLines = [];
+  let logsAutoRefreshInterval = null;
+
+  async function loadSystemLogs() {
+    const linesCount = document.getElementById('logs-line-count')?.value || '150';
+    const term = document.getElementById('logs-terminal');
+    const info = document.getElementById('logs-file-info');
+    const btn = document.getElementById('btn-refresh-logs');
+
+    if (btn) btn.disabled = true;
+
+    try {
+      const res = await fetch(`/api/logs?lines=${linesCount}`);
+      if (res.status === 401) {
+        showLogin();
+        return;
+      }
+      const data = await res.json();
+      allLogLines = data.lines || [];
+      if (info && data.path) {
+        info.innerHTML = `Showing last <strong>${allLogLines.length}</strong> lines from <code>${esc(data.path)}</code>.`;
+      }
+      filterLogsView();
+    } catch(err) {
+      if (term) term.innerText = 'Error loading logs: ' + err.message;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function filterLogsView() {
+    const term = document.getElementById('logs-terminal');
+    if (!term) return;
+    const filter = (document.getElementById('logs-filter-input')?.value || '').toLowerCase().trim();
+    const autoScroll = document.getElementById('logs-auto-scroll')?.checked;
+
+    let filtered = allLogLines;
+    if (filter) {
+      filtered = allLogLines.filter(l => l.toLowerCase().includes(filter));
+    }
+
+    if (!filtered.length) {
+      term.innerHTML = '<span style="color:var(--muted-foreground);">No matching log entries found.</span>';
+      return;
+    }
+
+    const formatted = filtered.map(line => {
+      const safe = esc(line);
+      if (line.includes(' ERR ') || line.includes('"level":"error"')) {
+        return `<span style="color:#f87171;">${safe}</span>`;
+      } else if (line.includes(' WRN ') || line.includes('"level":"warn"')) {
+        return `<span style="color:#fbbf24;">${safe}</span>`;
+      } else if (line.includes(' INF ') || line.includes('"level":"info"')) {
+        return `<span style="color:#93c5fd;">${safe}</span>`;
+      } else if (line.includes(' DBG ') || line.includes('"level":"debug"')) {
+        return `<span style="color:#9ca3af;">${safe}</span>`;
+      }
+      return safe;
+    }).join('\n');
+
+    term.innerHTML = formatted;
+
+    if (autoScroll) {
+      term.scrollTop = term.scrollHeight;
+    }
+  }
+
+  function toggleLogsAutoRefresh() {
+    const btn = document.getElementById('btn-logs-autorefresh');
+    if (logsAutoRefreshInterval) {
+      clearInterval(logsAutoRefreshInterval);
+      logsAutoRefreshInterval = null;
+      if (btn) {
+        btn.innerHTML = '<span>⏱</span> Auto-refresh: Off';
+        btn.classList.remove('active');
+      }
+    } else {
+      logsAutoRefreshInterval = setInterval(loadSystemLogs, 5000);
+      if (btn) {
+        btn.innerHTML = '<span>⏱</span> Auto-refresh: 5s';
+        btn.classList.add('active');
+      }
+    }
   }
 
   // Init

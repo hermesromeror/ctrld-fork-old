@@ -2,32 +2,143 @@ package cli
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Control-D-Inc/ctrld"
 	"github.com/miekg/dns"
 	"github.com/pelletier/go-toml/v2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 //go:embed web/index.html
 var webIndexHTML []byte
+
+type loginAttempt struct {
+	failedCount int
+	lockedUntil time.Time
+}
+
+type sessionManager struct {
+	sync.RWMutex
+	sessions     map[string]time.Time
+	failedLogins map[string]*loginAttempt
+}
+
+func newSessionManager() *sessionManager {
+	return &sessionManager{
+		sessions:     make(map[string]time.Time),
+		failedLogins: make(map[string]*loginAttempt),
+	}
+}
+
+func (sm *sessionManager) CreateSession() (string, error) {
+	sm.Lock()
+	defer sm.Unlock()
+
+	b := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return "", err
+	}
+	sid := hex.EncodeToString(b)
+	sm.sessions[sid] = time.Now()
+	return sid, nil
+}
+
+func (sm *sessionManager) ValidateSession(sid string) bool {
+	if sid == "" {
+		return false
+	}
+	sm.Lock()
+	defer sm.Unlock()
+
+	lastActive, ok := sm.sessions[sid]
+	if !ok {
+		return false
+	}
+	if time.Since(lastActive) > 12*time.Hour {
+		delete(sm.sessions, sid)
+		return false
+	}
+	sm.sessions[sid] = time.Now()
+	return true
+}
+
+func (sm *sessionManager) DeleteSession(sid string) {
+	sm.Lock()
+	defer sm.Unlock()
+	delete(sm.sessions, sid)
+}
+
+func (sm *sessionManager) IsIPLocked(ip string) (bool, int) {
+	sm.RLock()
+	defer sm.RUnlock()
+
+	att, ok := sm.failedLogins[ip]
+	if !ok {
+		return false, 0
+	}
+	if time.Now().Before(att.lockedUntil) {
+		remaining := int(time.Until(att.lockedUntil).Minutes()) + 1
+		return true, remaining
+	}
+	return false, 0
+}
+
+func (sm *sessionManager) RecordFailedLogin(ip string) (locked bool, remainingMinutes int) {
+	sm.Lock()
+	defer sm.Unlock()
+
+	att, ok := sm.failedLogins[ip]
+	if !ok {
+		att = &loginAttempt{}
+		sm.failedLogins[ip] = att
+	}
+	att.failedCount++
+	if att.failedCount >= 5 {
+		att.lockedUntil = time.Now().Add(15 * time.Minute)
+		return true, 15
+	}
+	return false, 0
+}
+
+func (sm *sessionManager) ResetFailedLogins(ip string) {
+	sm.Lock()
+	defer sm.Unlock()
+	delete(sm.failedLogins, ip)
+}
 
 type webServer struct {
 	p         *prog
 	server    *http.Server
 	mux       *http.ServeMux
 	addr      string
-	token     string
+	listenIP  string
+	port      int
+	certDir   string
+	sm        *sessionManager
 	started   bool
 	startTime time.Time
 }
@@ -36,10 +147,109 @@ func (p *prog) webUIEnabled() bool {
 	return p.cfg != nil && p.cfg.Web != nil && p.cfg.Web.Enable
 }
 
+func defaultCertDir() string {
+	cand := "/data/controld/web"
+	if err := os.MkdirAll(cand, 0755); err == nil {
+		return cand
+	}
+	cand2 := filepath.Join(os.TempDir(), "ctrld_web")
+	_ = os.MkdirAll(cand2, 0755)
+	return cand2
+}
+
+func generateSelfSignedCert(certPath, keyPath string, listenIP string) error {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	notBefore := time.Now().Add(-5 * time.Minute)
+	notAfter := notBefore.Add(825 * 24 * time.Hour) // 825 days
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Firewalla ControlD"},
+			CommonName:   "ctrld Web UI",
+		},
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  false,
+	}
+
+	ips := []net.IP{net.ParseIP("192.168.20.1"), net.ParseIP("127.0.0.1")}
+	if listenIP != "" && listenIP != "0.0.0.0" {
+		if parsed := net.ParseIP(listenIP); parsed != nil {
+			ips = append(ips, parsed)
+		}
+	}
+	template.IPAddresses = ips
+	template.DNSNames = []string{"firewalla.lan", "localhost"}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(certPath), 0755); err != nil {
+		return fmt.Errorf("failed to create cert dir: %w", err)
+	}
+
+	certOut, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open cert.pem: %w", err)
+	}
+	defer certOut.Close()
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		return fmt.Errorf("failed to write cert.pem: %w", err)
+	}
+
+	keyBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return fmt.Errorf("unable to marshal ECDSA private key: %w", err)
+	}
+	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to open key.pem: %w", err)
+	}
+	defer keyOut.Close()
+	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes}); err != nil {
+		return fmt.Errorf("failed to write key.pem: %w", err)
+	}
+
+	return nil
+}
+
+func getCertSHA256Fingerprint(certPath string) string {
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return ""
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return ""
+	}
+	sum := sha256.Sum256(block.Bytes)
+	parts := make([]string, len(sum))
+	for i, b := range sum {
+		parts[i] = fmt.Sprintf("%02X", b)
+	}
+	return strings.Join(parts, ":")
+}
+
 func (p *prog) newWebServer() (*webServer, error) {
-	listenIP := "192.168.1.1"
+	listenIP := "192.168.20.1"
 	port := 5380
-	token := ""
+	certDir := defaultCertDir()
 
 	if p.cfg.Web != nil {
 		if p.cfg.Web.ListenIP != "" {
@@ -48,7 +258,9 @@ func (p *prog) newWebServer() (*webServer, error) {
 		if p.cfg.Web.Port > 0 {
 			port = p.cfg.Web.Port
 		}
-		token = p.cfg.Web.AuthToken
+		if p.cfg.Web.CertDir != "" {
+			certDir = p.cfg.Web.CertDir
+		}
 	}
 
 	addr := net.JoinHostPort(listenIP, strconv.Itoa(port))
@@ -58,7 +270,10 @@ func (p *prog) newWebServer() (*webServer, error) {
 		p:         p,
 		mux:       mux,
 		addr:      addr,
-		token:     token,
+		listenIP:  listenIP,
+		port:      port,
+		certDir:   certDir,
+		sm:        newSessionManager(),
 		startTime: time.Now(),
 	}
 
@@ -73,18 +288,32 @@ func (p *prog) newWebServer() (*webServer, error) {
 	return ws, nil
 }
 
-func (ws *webServer) isAuthorized(r *http.Request) bool {
-	if ws.token == "" {
-		return true
+func (ws *webServer) getSessionID(r *http.Request) string {
+	cookie, err := r.Cookie("ctrld_session")
+	if err == nil && cookie.Value != "" {
+		return cookie.Value
 	}
-	reqToken := r.Header.Get("X-Auth-Token")
-	if reqToken == "" {
-		authHdr := r.Header.Get("Authorization")
-		if strings.HasPrefix(authHdr, "Bearer ") {
-			reqToken = strings.TrimPrefix(authHdr, "Bearer ")
-		}
+	authHdr := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHdr, "Bearer ") {
+		return strings.TrimPrefix(authHdr, "Bearer ")
 	}
-	return reqToken != "" && reqToken == ws.token
+	if s := r.Header.Get("X-Session-Token"); s != "" {
+		return s
+	}
+	return ""
+}
+
+func (ws *webServer) isAuthenticated(r *http.Request) bool {
+	sid := ws.getSessionID(r)
+	return ws.sm.ValidateSession(sid)
+}
+
+func getRemoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
@@ -93,23 +322,28 @@ func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:;")
+		w.Header().Set("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; connect-src 'self' wss:; img-src 'self' data:;")
 
-		// Host header validation (blocks DNS rebinding and rogue host headers)
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		}
+
+		// Host header validation
 		host, _, err := net.SplitHostPort(r.Host)
 		if err != nil {
 			host = r.Host
 		}
 		expectedHost, _, _ := net.SplitHostPort(ws.addr)
-		if host != expectedHost && host != "127.0.0.1" && host != "localhost" && host != "192.168.20.1" {
+		isAllowedHost := host == expectedHost || host == "192.168.20.1" || host == "127.0.0.1" || host == "localhost" || host == "firewalla.lan"
+		if !isAllowedHost {
 			http.Error(w, `{"error":"invalid host header"}`, http.StatusForbidden)
 			return
 		}
 
-		// Cross-origin check: reject external cross-origin requests
+		// Cross-origin check
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			if !strings.Contains(origin, expectedHost) && !strings.Contains(origin, "127.0.0.1") && !strings.Contains(origin, "localhost") && !strings.Contains(origin, "192.168.20.1") {
+			if !strings.Contains(origin, expectedHost) && !strings.Contains(origin, "192.168.20.1") && !strings.Contains(origin, "127.0.0.1") && !strings.Contains(origin, "localhost") && !strings.Contains(origin, "firewalla.lan") {
 				http.Error(w, `{"error":"cross-origin forbidden"}`, http.StatusForbidden)
 				return
 			}
@@ -120,22 +354,21 @@ func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Public endpoints: "/", "/api/status", "/api/test-dns", "/api/verify-token"
-		// Everything else (/api/queries, /api/stream, /api/devices, /api/upstreams, /api/config-raw, /api/config-save, /api/restart, /api/flush-cache) requires token!
+		// Public endpoints that don't require session cookie
 		publicEndpoints := map[string]bool{
-			"/":                 true,
-			"/api/status":       true,
-			"/api/test-dns":     true,
-			"/api/verify-token": true,
+			"/":               true,
+			"/login":          true,
+			"/api/login":      true,
+			"/api/auth-check": true,
 		}
 
-		if ws.token != "" && !publicEndpoints[r.URL.Path] {
-			if !ws.isAuthorized(r) {
+		if !publicEndpoints[r.URL.Path] {
+			if !ws.isAuthenticated(r) {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.WriteHeader(http.StatusUnauthorized)
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"status":  "error",
-					"message": "Admin authorization token required or invalid",
+					"message": "Authentication required. Please log in.",
 				})
 				return
 			}
@@ -146,15 +379,130 @@ func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 }
 
 func (ws *webServer) registerRoutes() {
-	// Root: Web UI SPA
+	// Root and /login: Web UI SPA
 	ws.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
+		if r.URL.Path != "/" && r.URL.Path != "/login" {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		_, _ = w.Write(webIndexHTML)
+	})
+
+	// GET /api/auth-check
+	ws.mux.HandleFunc("/api/auth-check", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		hasPasswordHash := ws.p.cfg.Web != nil && ws.p.cfg.Web.PasswordHash != ""
+		isAuth := ws.isAuthenticated(r)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"authenticated": isAuth,
+			"configured":    hasPasswordHash,
+		})
+	})
+
+	// POST /api/login
+	ws.mux.HandleFunc("/api/login", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"status":"error","message":"Method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+
+		clientIP := getRemoteIP(r)
+		if locked, mins := ws.sm.IsIPLocked(clientIP); locked {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  "error",
+				"message": fmt.Sprintf("Too many failed attempts. IP locked for %d minutes.", mins),
+			})
+			return
+		}
+
+		if ws.p.cfg.Web == nil || ws.p.cfg.Web.PasswordHash == "" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  "error",
+				"message": "Web UI password is not configured yet. Run 'ctrld web-passwd' to set it.",
+			})
+			return
+		}
+
+		var req struct {
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  "error",
+				"message": "Invalid login request payload",
+			})
+			return
+		}
+
+		err := bcrypt.CompareHashAndPassword([]byte(ws.p.cfg.Web.PasswordHash), []byte(req.Password))
+		if err != nil {
+			locked, mins := ws.sm.RecordFailedLogin(clientIP)
+			mainLog.Load().Warn().Msgf("Failed Web UI login attempt from IP: %s", clientIP)
+			w.WriteHeader(http.StatusUnauthorized)
+			msg := "Invalid password"
+			if locked {
+				msg = fmt.Sprintf("Invalid password. Too many failed attempts: IP locked for %d minutes.", mins)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  "error",
+				"message": msg,
+			})
+			return
+		}
+
+		ws.sm.ResetFailedLogins(clientIP)
+		sid, err := ws.sm.CreateSession()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  "error",
+				"message": "Could not create session",
+			})
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "ctrld_session",
+			Value:    sid,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   43200, // 12 hours
+		})
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  "ok",
+			"message": "Logged in successfully",
+		})
+	})
+
+	// POST /api/logout
+	ws.mux.HandleFunc("/api/logout", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		sid := ws.getSessionID(r)
+		if sid != "" {
+			ws.sm.DeleteSession(sid)
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     "ctrld_session",
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   -1,
+		})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  "ok",
+			"message": "Logged out successfully",
+		})
 	})
 
 	// GET /api/status
@@ -177,7 +525,6 @@ func (ws *webServer) registerRoutes() {
 			cacheItems = ws.p.cache.Len()
 		}
 
-		// Active upstream info
 		activeUpstreamName := "NextDNS"
 		activeUpstreamType := "doh3"
 		activeEndpoint := ""
@@ -190,20 +537,18 @@ func (ws *webServer) registerRoutes() {
 		}
 
 		status := map[string]any{
-			"version":         curVersion(),
-			"pid":             os.Getpid(),
-			"uptime_sec":      int64(uptime.Seconds()),
-			"uptime_str":      fmt.Sprintf("%dh %dm", hours, mins),
-			"go_os":           runtime.GOOS,
-			"go_arch":         runtime.GOARCH,
-			"num_goroutine":   runtime.NumGoroutine(),
-			"mem_rss_mb":      rssMB,
-			"mem_alloc_mb":    float64(m.Alloc) / (1024 * 1024),
-			"mem_sys_mb":      float64(m.Sys) / (1024 * 1024),
-			"cache_items":     cacheItems,
-			"cache_size":      ws.p.cfg.Service.CacheSize,
-			"auth_configured": ws.token != "",
-			"is_admin":        ws.isAuthorized(r),
+			"version":       curVersion(),
+			"pid":           os.Getpid(),
+			"uptime_sec":    int64(uptime.Seconds()),
+			"uptime_str":    fmt.Sprintf("%dh %dm", hours, mins),
+			"go_os":         runtime.GOOS,
+			"go_arch":       runtime.GOARCH,
+			"num_goroutine": runtime.NumGoroutine(),
+			"mem_rss_mb":    rssMB,
+			"mem_alloc_mb":  float64(m.Alloc) / (1024 * 1024),
+			"mem_sys_mb":    float64(m.Sys) / (1024 * 1024),
+			"cache_items":   cacheItems,
+			"cache_size":    ws.p.cfg.Service.CacheSize,
 			"active_upstream": map[string]any{
 				"name":     activeUpstreamName,
 				"type":     strings.ToUpper(activeUpstreamType),
@@ -286,46 +631,6 @@ func (ws *webServer) registerRoutes() {
 		})
 	})
 
-	// POST /api/verify-token
-	ws.mux.HandleFunc("/api/verify-token", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		if r.Method != http.MethodPost {
-			http.Error(w, `{"status":"error","message":"Method not allowed"}`, http.StatusMethodNotAllowed)
-			return
-		}
-		var req struct {
-			Token string `json:"token"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-
-		token := req.Token
-		if token == "" {
-			token = r.Header.Get("X-Auth-Token")
-		}
-		if token == "" {
-			authHdr := r.Header.Get("Authorization")
-			if strings.HasPrefix(authHdr, "Bearer ") {
-				token = strings.TrimPrefix(authHdr, "Bearer ")
-			}
-		}
-
-		if ws.token == "" || (token != "" && token == ws.token) {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"valid":           true,
-				"auth_configured": ws.token != "",
-				"message":         "Token verified successfully",
-			})
-			return
-		}
-
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"valid":           false,
-			"auth_configured": true,
-			"message":         "Invalid authentication token",
-		})
-	})
-
 	// GET /api/test-dns
 	ws.mux.HandleFunc("/api/test-dns", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -337,44 +642,30 @@ func (ws *webServer) registerRoutes() {
 
 		qtypeStr := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("type")))
 		qtype := dns.TypeA
-		switch qtypeStr {
-		case "AAAA":
-			qtype = dns.TypeAAAA
-		case "TXT":
-			qtype = dns.TypeTXT
-		case "PTR":
-			qtype = dns.TypePTR
-		case "MX":
-			qtype = dns.TypeMX
+		if t, ok := dns.StringToType[qtypeStr]; ok {
+			qtype = t
 		}
-
-		// Find listener address
-		port := 5354
-		ip := "127.0.0.1"
-		if ws.p.cfg != nil && len(ws.p.cfg.Listener) > 0 {
-			l0 := ws.p.cfg.FirstListener()
-			if l0.Port > 0 {
-				port = l0.Port
-			}
-			if l0.IP != "" && l0.IP != "0.0.0.0" {
-				ip = l0.IP
-			}
-		}
-		dnsServer := net.JoinHostPort(ip, strconv.Itoa(port))
 
 		m := new(dns.Msg)
 		m.SetQuestion(name, qtype)
 		m.RecursionDesired = true
 		m.SetEdns0(1232, false)
 
+		targetAddr := "192.168.1.1:5354"
+		if ws.p.cfg != nil && len(ws.p.cfg.Listener) > 0 {
+			if l0, ok := ws.p.cfg.Listener["0"]; ok && l0 != nil {
+				targetAddr = net.JoinHostPort(l0.IP, strconv.Itoa(l0.Port))
+			}
+		}
+
 		c := new(dns.Client)
 		c.Timeout = 3 * time.Second
 
-		t0 := time.Now()
-		in, rtt, err := c.Exchange(m, dnsServer)
-		rttMs := rtt.Milliseconds()
+		start := time.Now()
+		in, _, err := c.Exchange(m, targetAddr)
+		rttMs := time.Since(start).Milliseconds()
+
 		if err != nil {
-			rttMs = time.Since(t0).Milliseconds()
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"name":       name,
 				"type":       dns.TypeToString[qtype],
@@ -402,7 +693,6 @@ func (ws *webServer) registerRoutes() {
 					if ede, ok := o.(*dns.EDNS0_EDE); ok {
 						edeCode = int(ede.InfoCode)
 						edeText = ede.ExtraText
-						// RFC 8914: 15=Blocked, 16=Censored, 17=Filtered, 18=Prohibited
 						if ede.InfoCode >= 15 && ede.InfoCode <= 18 {
 							blocked = true
 							desc := "Filtered"
@@ -430,27 +720,25 @@ func (ws *webServer) registerRoutes() {
 			}
 		}
 
-		// Also check answers for 0.0.0.0 or ::
 		for _, ans := range in.Answer {
 			if a, ok := ans.(*dns.A); ok && (a.A.IsUnspecified() || a.A.IsLoopback()) {
 				blocked = true
 				if blockReason == "" {
-					blockReason = "Respuesta 0.0.0.0 (IP de bloqueo)"
+					blockReason = "0.0.0.0 response (Block IP)"
 				}
 			}
 			if aaaa, ok := ans.(*dns.AAAA); ok && (aaaa.AAAA.IsUnspecified() || aaaa.AAAA.IsLoopback()) {
 				blocked = true
 				if blockReason == "" {
-					blockReason = "Respuesta :: (IP de bloqueo)"
+					blockReason = ":: response (Block IPv6)"
 				}
 			}
 		}
 
-		// If NODATA (NOERROR with 0 answers) and has EDE filtered, it's blocked
 		if len(in.Answer) == 0 && (edeCode == 17 || edeCode == 15 || strings.Contains(strings.ToLower(edeText), "blocked")) {
 			blocked = true
 			if blockReason == "" {
-				blockReason = "Filtrado por NextDNS (NODATA)"
+				blockReason = "Filtered by NextDNS (NODATA)"
 			}
 		}
 
@@ -500,7 +788,7 @@ func (ws *webServer) registerRoutes() {
 			Endpoint    string  `json:"endpoint"`
 			BootstrapIP string  `json:"bootstrap_ip"`
 			Timeout     int     `json:"timeout"`
-			Status      string  `json:"status"` // "In Use", "Standby", "Last Resort"
+			Status      string  `json:"status"`
 			Role        string  `json:"role"`
 			Latency     float64 `json:"latency"`
 		}
@@ -615,7 +903,6 @@ func (ws *webServer) registerRoutes() {
 			return
 		}
 
-		// Validar sintaxis TOML antes de escribir
 		var testCfg ctrld.Config
 		if err := toml.Unmarshal([]byte(content), &testCfg); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -631,7 +918,6 @@ func (ws *webServer) registerRoutes() {
 			filePath = "/data/controld/ctrld.toml"
 		}
 
-		// Crear respaldo timestamped antes de sobrescribir
 		oldData, err := os.ReadFile(filePath)
 		var bakPath string
 		if err == nil {
@@ -639,7 +925,6 @@ func (ws *webServer) registerRoutes() {
 			_ = os.WriteFile(bakPath, oldData, 0600)
 		}
 
-		// Escritura atómica a archivo temporal y rename
 		tmpFile := filePath + ".tmp"
 		if err := os.WriteFile(tmpFile, []byte(req.Content), 0600); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -659,7 +944,6 @@ func (ws *webServer) registerRoutes() {
 			return
 		}
 
-		// Recarga en caliente en background
 		go func() {
 			time.Sleep(300 * time.Millisecond)
 			_ = ws.p.reloadConfig()
@@ -701,14 +985,37 @@ func (p *prog) reloadConfig() error {
 }
 
 func (ws *webServer) start() error {
+	certPath := filepath.Join(ws.certDir, "cert.pem")
+	keyPath := filepath.Join(ws.certDir, "key.pem")
+
+	if _, err := os.Stat(certPath); os.IsNotExist(err) {
+		if err := generateSelfSignedCert(certPath, keyPath, ws.listenIP); err != nil {
+			return fmt.Errorf("generate self-signed cert: %w", err)
+		}
+	}
+
+	fp := getCertSHA256Fingerprint(certPath)
+	mainLog.Load().Info().Msgf("ctrld Web UI TLS certificate SHA-256 fingerprint: %s", fp)
+
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return fmt.Errorf("load TLS keypair: %w", err)
+	}
+
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
 	listener, err := net.Listen("tcp", ws.addr)
 	if err != nil {
 		return err
 	}
+	tlsListener := tls.NewListener(listener, tlsCfg)
 	ws.started = true
-	mainLog.Load().Info().Msgf("ctrld Web UI listening on http://%s", ws.addr)
+	mainLog.Load().Info().Msgf("ctrld Web UI listening on https://%s", ws.addr)
 	go func() {
-		if err := ws.server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		if err := ws.server.Serve(tlsListener); err != nil && err != http.ErrServerClosed {
 			mainLog.Load().Warn().Err(err).Msg("Web UI server closed with error")
 		}
 	}()
@@ -729,30 +1036,40 @@ func (p *prog) runWebUI(ctx context.Context, reloadCh chan struct{}) {
 		return
 	}
 
-	if p.webRingBuf == nil {
-		p.webRingBuf = NewWebRingBuffer(500)
+	// Safe default check: warn if password_hash is missing
+	if p.cfg.Web.PasswordHash == "" {
+		mainLog.Load().Warn().Msg("Web UI is enabled but password_hash is not set; run 'ctrld web-passwd' to set an admin password")
 	}
 
 	ws, err := p.newWebServer()
 	if err != nil {
-		mainLog.Load().Error().Err(err).Msg("could not create Web UI server")
+		mainLog.Load().Error().Err(err).Msg("failed to initialize Web UI")
 		return
 	}
-	p.webServer = ws
 
 	if err := ws.start(); err != nil {
-		mainLog.Load().Error().Err(err).Msgf("could not start Web UI server on %s", ws.addr)
+		mainLog.Load().Error().Err(err).Msg("failed to start Web UI server")
 		return
 	}
 
-	select {
-	case <-p.stopCh:
-	case <-ctx.Done():
-	case <-reloadCh:
-	}
-
-	if err := ws.stop(); err != nil {
-		mainLog.Load().Warn().Err(err).Msg("could not stop Web UI server")
+	for {
+		select {
+		case <-ctx.Done():
+			_ = ws.stop()
+			return
+		case <-reloadCh:
+			_ = ws.stop()
+			newWs, err := p.newWebServer()
+			if err != nil {
+				mainLog.Load().Error().Err(err).Msg("failed to recreate Web UI after reload")
+				return
+			}
+			if err := newWs.start(); err != nil {
+				mainLog.Load().Error().Err(err).Msg("failed to restart Web UI after reload")
+				return
+			}
+			ws = newWs
+		}
 	}
 }
 

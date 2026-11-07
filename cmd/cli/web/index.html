@@ -30,6 +30,7 @@
       font-size: 13px;
       line-height: 1.5;
       padding: 16px;
+      min-height: 100vh;
     }
     /* Scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -200,45 +201,38 @@
       background: rgba(15, 23, 42, 0.3);
       overflow-x: auto;
     }
-    .tab-btn {
-      background: transparent;
-      border: none;
-      border-bottom: 2px solid transparent;
-      border-radius: 0;
+    .tab-item {
       padding: 12px 4px;
-      font-size: 12px;
-      font-weight: 600;
       color: var(--muted-foreground);
+      font-weight: 600;
+      font-size: 12px;
       cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s ease;
       white-space: nowrap;
     }
-    .tab-btn:hover {
-      color: var(--foreground);
-      background: transparent;
-    }
-    .tab-btn.active {
+    .tab-item:hover { color: var(--foreground); }
+    .tab-item.active {
       color: #60a5fa;
       border-bottom-color: #3b82f6;
     }
 
-    /* Tab Contents */
+    /* Tab Content Views */
     .tab-view {
       display: none;
       padding: 20px;
-      flex-direction: column;
-      gap: 14px;
+      min-height: 440px;
     }
-    .tab-view.active {
-      display: flex;
-    }
+    .tab-view.active { display: block; }
 
-    /* Filters Bar */
-    .filter-row {
+    /* Feed Controls */
+    .feed-controls {
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
       gap: 10px;
+      margin-bottom: 14px;
     }
     .filter-group {
       display: flex;
@@ -246,107 +240,97 @@
       gap: 6px;
       flex-wrap: wrap;
     }
-    input[type="text"], select {
-      background: #1f2937;
-      border: 1px solid var(--card-border);
-      color: var(--foreground);
-      padding: 6px 12px;
-      border-radius: 8px;
-      font-size: 12px;
-      outline: none;
-    }
-    input[type="text"]:focus, select:focus {
-      border-color: var(--accent);
-    }
-    .flt-pill {
-      background: transparent;
-      border: 1px solid transparent;
+    .btn-filter {
       padding: 5px 10px;
-      border-radius: 6px;
       font-size: 11px;
+      border-radius: 6px;
+      background: #1f2937;
       color: var(--muted-foreground);
+      border: 1px solid var(--card-border);
+      cursor: pointer;
     }
-    .flt-pill:hover {
-      color: var(--foreground);
-      background: rgba(255, 255, 255, 0.05);
-    }
-    .flt-pill.active {
-      background: rgba(255, 255, 255, 0.1);
-      color: var(--foreground);
+    .btn-filter.active {
+      background: rgba(59, 130, 246, 0.18);
+      color: #93c5fd;
+      border-color: rgba(59, 130, 246, 0.4);
       font-weight: 700;
     }
+    .search-input {
+      background: #070a11;
+      border: 1px solid var(--card-border);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      outline: none;
+      width: 200px;
+    }
+    .search-input:focus { border-color: var(--accent); }
 
-    /* Queries Table */
-    .table-box {
+    /* Tables */
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
       border: 1px solid var(--card-border);
       border-radius: 12px;
       background: rgba(11, 15, 25, 0.4);
-      max-height: 420px;
-      overflow-y: auto;
     }
     table {
       width: 100%;
       border-collapse: collapse;
       text-align: left;
-      font-size: 12px;
-    }
-    thead {
-      position: sticky;
-      top: 0;
-      background: #111827;
-      z-index: 2;
-      border-bottom: 1px solid var(--card-border);
     }
     th {
-      padding: 9px 12px;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--muted-foreground);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    td {
-      padding: 8px 12px;
-      border-bottom: 1px solid rgba(31, 41, 55, 0.5);
-      vertical-align: middle;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      white-space: nowrap;
-    }
-    tr:hover {
-      background: rgba(31, 41, 55, 0.35);
-    }
-    .status-badge {
-      display: inline-block;
-      padding: 2px 7px;
-      border-radius: 4px;
+      padding: 10px 14px;
       font-size: 10px;
       font-weight: 700;
-      font-family: ui-monospace, monospace;
+      color: var(--muted-foreground);
+      border-bottom: 1px solid var(--card-border);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: rgba(17, 24, 39, 0.5);
     }
-    .badge-allowed { background: var(--emerald-bg); color: var(--emerald); border: 1px solid rgba(16, 185, 129, 0.25); }
-    .badge-cached { background: var(--purple-bg); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.25); }
-    .badge-blocked { background: var(--rose-bg); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.25); }
-    .badge-nxdomain { background: var(--amber-bg); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.25); }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(31, 41, 55, 0.5);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
 
-    /* Upstream Cards */
+    .status-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+      display: inline-block;
+      text-transform: uppercase;
+    }
+    .badge-allowed { background: var(--emerald-bg); color: var(--emerald); border: 1px solid rgba(16, 185, 129, 0.2); }
+    .badge-blocked { background: var(--rose-bg); color: var(--rose); border: 1px solid rgba(244, 63, 94, 0.2); }
+    .badge-cached { background: var(--purple-bg); color: var(--purple); border: 1px solid rgba(168, 85, 247, 0.2); }
+    .badge-nxdomain { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.2); }
+
+    /* Upstream Card */
     .upstream-card {
-      padding: 14px 18px;
-      border-radius: 12px;
       border: 1px solid var(--card-border);
-      background: rgba(11, 15, 25, 0.4);
+      border-radius: 12px;
+      padding: 16px;
+      background: rgba(11, 15, 25, 0.5);
+      margin-bottom: 10px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 12px;
-      transition: all 0.15s ease;
+      gap: 16px;
     }
     .upstream-card.active-primary {
-      border-color: rgba(16, 185, 129, 0.35);
+      border-color: rgba(16, 185, 129, 0.4);
       background: rgba(16, 185, 129, 0.04);
     }
     .upstream-num {
-      width: 32px;
-      height: 32px;
+      width: 28px;
+      height: 28px;
       border-radius: 8px;
       background: rgba(255, 255, 255, 0.06);
       display: flex;
@@ -389,9 +373,7 @@
       outline: none;
       tab-size: 2;
     }
-    .toml-editor:focus {
-      border-color: #3b82f6;
-    }
+    .toml-editor:focus { border-color: #3b82f6; }
 
     .toast {
       position: fixed;
@@ -418,7 +400,38 @@
 </head>
 <body>
 
-<div class="container">
+<!-- VIEW 1: LOGIN SCREEN -->
+<div id="login-view" style="display:none; min-height:85vh; display:flex; align-items:center; justify-content:center; padding:16px;">
+  <div style="width:100%; max-width:390px; background:var(--card); border:1px solid var(--card-border); border-radius:18px; padding:36px 30px; box-shadow:0 30px 60px rgba(0,0,0,0.7); text-align:center;">
+    <div style="width:54px; height:54px; border-radius:14px; background:rgba(59, 130, 246, 0.15); border:1px solid rgba(59, 130, 246, 0.3); color:#60a5fa; font-size:26px; display:inline-flex; align-items:center; justify-content:center; margin-bottom:16px;">⚡</div>
+    <h1 style="font-size:20px; font-weight:700; margin-bottom:4px; letter-spacing:-0.3px;">ctrld Manager</h1>
+    <p style="font-size:12px; color:var(--muted-foreground); margin-bottom:24px;">Firewalla Gold • Encrypted HTTPS Session</p>
+
+    <div id="setup-warning" style="display:none; background:rgba(245, 158, 11, 0.12); border:1px solid rgba(245, 158, 11, 0.3); border-radius:10px; padding:12px 14px; margin-bottom:20px; font-size:12px; color:#fbbf24; text-align:left; line-height:1.5;">
+      <strong>Password not configured yet.</strong><br>Run <code>ctrld web-passwd</code> in the Firewalla SSH console to set an admin password.
+    </div>
+
+    <div id="login-error" style="display:none; background:var(--rose-bg); border:1px solid rgba(244, 63, 94, 0.3); border-radius:10px; padding:12px 14px; margin-bottom:20px; font-size:12px; color:#fca5a5; text-align:left; line-height:1.4;"></div>
+
+    <form onsubmit="handleLogin(event)" style="text-align:left;">
+      <label style="display:block; font-size:11px; font-weight:600; color:var(--muted-foreground); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">Admin Password</label>
+      <div style="position:relative; margin-bottom:20px;">
+        <input type="password" id="login-password" placeholder="Enter admin password..." required style="width:100%; padding:11px 40px 11px 14px; border-radius:10px; border:1px solid var(--card-border); background:#070a11; color:#fff; font-size:13px; outline:none; transition:border 0.2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--card-border)'">
+        <button type="button" onclick="togglePasswordVisibility()" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:transparent; border:none; color:var(--muted-foreground); cursor:pointer; font-size:16px; padding:4px;">👁</button>
+      </div>
+      <button type="submit" id="btn-login-submit" class="primary" style="width:100%; padding:11px; font-size:13px; font-weight:700; border-radius:10px; justify-content:center;">
+        <span>Sign In</span>
+      </button>
+    </form>
+
+    <div style="margin-top:24px; font-size:11px; color:var(--muted-foreground); border-top:1px solid var(--card-border); padding-top:16px;">
+      Protected with bcrypt hashing & brute-force mitigation
+    </div>
+  </div>
+</div>
+
+<!-- VIEW 2: AUTHENTICATED APP SCREEN -->
+<div id="app-view" style="display:none;" class="container">
 
   <!-- Header -->
   <header>
@@ -429,21 +442,21 @@
           <span>ctrld Manager</span>
           <span class="badge-version">
             <span class="pulse-dot"></span>
-            <span id="hdr-version">v3.18-webui</span>
+            <span id="hdr-version">v3.19-webui</span>
           </span>
         </div>
-        <div class="brand-subtitle">Firewalla Gold (192.168.1.1:5354) • Host: firewalla</div>
+        <div class="brand-subtitle">Firewalla Gold (192.168.20.1:5380 HTTPS) • Host: firewalla</div>
       </div>
     </div>
     <div class="header-actions">
-      <button id="btn-auth-toggle" onclick="toggleAuthModal()" style="background:rgba(245, 158, 11, 0.15); border:1px solid rgba(245, 158, 11, 0.4); color:#fbbf24; font-size:11px; padding:6px 11px;">
-        <span id="auth-status-icon">🔒</span> <span id="auth-status-text">Read-Only</span>
-      </button>
       <button onclick="flushCache()" id="btn-flush">
         <span>🧹</span> Flush Cache
       </button>
       <button onclick="restartService()" id="btn-restart" class="primary">
         <span>🔄</span> Restart
+      </button>
+      <button onclick="logout()" id="btn-logout" style="background:rgba(244, 63, 94, 0.12); border:1px solid rgba(244, 63, 94, 0.3); color:#fca5a5;">
+        <span>🚪</span> Log Out
       </button>
     </div>
   </header>
@@ -462,130 +475,136 @@
       </div>
     </div>
 
-    <!-- Card 2: Memory RAM Real -->
+    <!-- Card 2: Memory Footprint -->
     <div class="metric-card">
       <div class="metric-header">
-        <span>Real RAM Memory</span>
-        <span class="metric-tag" style="background:rgba(59,130,246,0.12); color:#60a5fa;" id="stat-ram-pct">0.8%</span>
+        <span>Process RSS Memory</span>
+        <span class="metric-tag" style="background:var(--emerald-bg); color:var(--emerald);" id="stat-pid">PID 2177214</span>
       </div>
-      <div class="metric-value"><span id="stat-ram-mb">32.5</span> <span style="font-size:12px; font-weight:normal; color:var(--muted-foreground)">MB RSS</span></div>
+      <div class="metric-value"><span id="stat-ram-mb">31.6</span> MB</div>
       <div class="metric-footer" style="color:var(--muted-foreground);">
-        <span id="stat-pid">PID 2172768</span> • <span id="stat-uptime">0h 0m</span>
+        <span>Intel Celeron J4125 • 0.8% RAM</span>
       </div>
     </div>
 
-    <!-- Card 3: Cache Hit Ratio -->
+    <!-- Card 3: Cache Performance -->
     <div class="metric-card">
       <div class="metric-header">
-        <span>Cache Hit Ratio</span>
-        <span class="metric-tag" style="background:var(--purple-bg); color:#c084fc;">RFC 1035</span>
+        <span>In-Memory Cache</span>
+        <span class="metric-tag" style="background:var(--purple-bg); color:var(--purple);">Size: 4096</span>
       </div>
-      <div class="metric-value" id="stat-cache-ratio">0.0%</div>
-      <div class="metric-footer" style="color:var(--muted-foreground);">
-        <span id="stat-cache-items">0</span> items in RAM (0.0 ms)
+      <div class="metric-value"><span id="stat-cache-items">24</span> <span style="font-size:13px; font-weight:400; color:var(--muted-foreground);">entries</span></div>
+      <div class="metric-footer" style="color:var(--purple);">
+        <span id="stat-cache-ratio">Local cache active</span>
       </div>
     </div>
 
-    <!-- Card 4: Security Block Rate -->
+    <!-- Card 4: Daemon Uptime -->
     <div class="metric-card">
       <div class="metric-header">
-        <span>Security Filter</span>
-        <span class="metric-tag" style="background:var(--rose-bg); color:#fb7185;">NextDNS</span>
+        <span>Daemon Uptime</span>
+        <span class="metric-tag" style="background:rgba(255,255,255,0.06); color:var(--muted-foreground);">systemd</span>
       </div>
-      <div class="metric-value"><span id="stat-block-pct">0.0%</span> <span style="font-size:12px; font-weight:normal; color:#fb7185;">blocked</span></div>
-      <div class="metric-footer" style="color:var(--muted-foreground);">
-        <span id="stat-block-count">0</span> of <span id="stat-total-count">0</span> threats/ads
+      <div class="metric-value" id="stat-uptime">0h 5m</div>
+      <div class="metric-footer" style="color:var(--emerald);">
+        <span>● 0 restarts (stable)</span>
       </div>
     </div>
   </div>
 
-  <!-- Interactive Navigation Tabs -->
+  <!-- Tabs Navigation Bar -->
   <div class="tabs-bar">
-    <button onclick="switchTab('feed')" id="tab-feed" class="tab-btn active">Live Feed</button>
-    <button onclick="switchTab('upstreams')" id="tab-upstreams" class="tab-btn">Upstream Chain</button>
-    <button onclick="switchTab('tester')" id="tab-tester" class="tab-btn">Live DNS Resolver</button>
-    <button onclick="switchTab('config')" id="tab-config" class="tab-btn">Configuration (TOML)</button>
+    <div class="tab-item active" id="tab-feed" onclick="switchTab('feed')">Live Feed</div>
+    <div class="tab-item" id="tab-upstreams" onclick="switchTab('upstreams')">Upstream Chain</div>
+    <div class="tab-item" id="tab-tester" onclick="switchTab('tester')">Live DNS Resolver</div>
+    <div class="tab-item" id="tab-config" onclick="switchTab('config')">Configuration (TOML)</div>
   </div>
 
   <!-- TAB 1: Live Feed -->
   <div id="view-feed" class="tab-view active">
-    <!-- Search & Filters -->
-    <div class="filter-row">
-      <div style="flex:1; min-width:220px;">
-        <input type="text" id="query-search" oninput="filterFeed()" placeholder="Search by domain or client IP..." style="width:100%;">
-      </div>
+    <div class="feed-controls">
       <div class="filter-group">
-        <button onclick="setStatusFilter('all')" id="flt-all" class="flt-pill active">All</button>
-        <button onclick="setStatusFilter('blocked')" id="flt-blocked" class="flt-pill">Blocked</button>
-        <button onclick="setStatusFilter('allowed')" id="flt-allowed" class="flt-pill">Allowed</button>
-        <button onclick="setStatusFilter('cached')" id="flt-cached" class="flt-pill">Cached</button>
-        <select id="dev-filter" onchange="filterFeed()" style="margin-left:6px;">
+        <button class="btn-filter active" id="flt-all" onclick="setStatusFilter('all')">All</button>
+        <button class="btn-filter" id="flt-blocked" onclick="setStatusFilter('blocked')">Blocked</button>
+        <button class="btn-filter" id="flt-allowed" onclick="setStatusFilter('allowed')">Allowed</button>
+        <button class="btn-filter" id="flt-cached" onclick="setStatusFilter('cached')">Cached</button>
+        
+        <select id="dev-filter" onchange="filterFeed()" style="background:#1f2937; border:1px solid var(--card-border); color:var(--foreground); padding:5px 8px; border-radius:6px; font-size:11px; outline:none;">
           <option value="all">All devices</option>
         </select>
-        <button onclick="togglePause()" id="btn-pause" style="margin-left:6px; padding:5px 10px; font-size:11px;">
-          <span id="icon-pause">⏸️</span> <span id="label-pause">Pause</span>
+      </div>
+
+      <div class="filter-group">
+        <input type="text" id="query-search" placeholder="Search domain / client..." class="search-input" oninput="filterFeed()">
+        <button onclick="togglePauseStream()" id="btn-pause" style="padding:5px 10px; font-size:11px;">
+          <span>⏸</span> Pause
         </button>
-        <button onclick="clearTable()" style="padding:5px 10px; font-size:11px;" title="Clear local list">
-          <span>🗑️</span>
+        <button onclick="clearTable()" style="padding:5px 10px; font-size:11px;">
+          <span>🗑</span> Clear
         </button>
       </div>
     </div>
 
     <!-- Feed Table -->
-    <div class="table-box">
+    <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Time</th>
-            <th>Client Device</th>
-            <th>Type</th>
+            <th style="width:75px;">Time</th>
+            <th style="width:170px;">Client Device</th>
+            <th style="width:60px;">Type</th>
             <th>Domain</th>
-            <th>Status / Upstream</th>
-            <th style="text-align:right;">Latency</th>
+            <th style="width:230px;">Status / Upstream</th>
+            <th style="width:75px; text-align:right;">Latency</th>
           </tr>
         </thead>
         <tbody id="feed-tbody">
-          <!-- Populated dynamically via SSE / Snapshot -->
+          <!-- Dynamically populated via SSE / initial fetch -->
         </tbody>
       </table>
     </div>
 
-    <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--muted-foreground);">
-      <span>Showing live DNS queries captured by <code>ctrld</code> daemon.</span>
-      <span style="color:var(--emerald); display:flex; align-items:center; gap:5px;">
-        <span class="pulse-dot"></span> Active SSE Stream
+    <div style="font-size:11px; color:var(--muted-foreground); margin-top:10px; display:flex; justify-content:space-between; align-items:center;">
+      <span>Showing live DNS queries captured by ctrld daemon.</span>
+      <span style="display:flex; align-items:center; gap:6px;">
+        <span class="pulse-dot"></span> Active Encrypted SSE Stream
       </span>
     </div>
   </div>
 
-  <!-- TAB 2: Upstreams -->
+  <!-- TAB 2: Upstream Chain -->
   <div id="view-upstreams" class="tab-view">
-    <div style="font-weight:700; font-size:14px;">ctrld Automatic Failover Chain</div>
-    <div style="font-size:12px; color:var(--muted-foreground);">
-      Cascading priority: if primary upstream times out (1.5s), <code>ctrld</code> automatically fails over to the next configured resolver.
+    <div style="margin-bottom:14px;">
+      <h3 style="font-size:14px; font-weight:700;">Multi-Tier Upstream Resolver Topology</h3>
+      <p style="font-size:12px; color:var(--muted-foreground); margin-top:2px;">
+        Failover chain configured in <code>/data/controld/ctrld.toml</code>. Primary queries go to NextDNS; automatic fallback engages if primary fails.
+      </p>
     </div>
-    <div id="upstreams-list" style="display:flex; flex-direction:column; gap:10px; margin-top:4px;">
-      <!-- Populated dynamically from /api/upstreams -->
+
+    <div id="upstreams-list">
+      <!-- Dynamically populated via /api/upstreams -->
     </div>
   </div>
 
-  <!-- TAB 3: Diagnostic Tester -->
+  <!-- TAB 3: Live DNS Resolver Tester -->
   <div id="view-tester" class="tab-view">
-    <div style="font-weight:700; font-size:14px;">Live DNS Resolver (dig simulator from Firewalla)</div>
-    <div style="font-size:12px; color:var(--muted-foreground);">
-      Test any domain to verify in real-time whether NextDNS allows or blocks it, or if it is served from local cache.
+    <div style="margin-bottom:14px;">
+      <h3 style="font-size:14px; font-weight:700;">Live DNS Resolver (dig simulator from Firewalla)</h3>
+      <p style="font-size:12px; color:var(--muted-foreground); margin-top:2px;">
+        Test any domain to verify in real-time whether NextDNS allows or blocks it, or if it resolves from local cache.
+      </p>
     </div>
 
-    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
-      <input type="text" id="test-domain-input" value="tracker.hdtvcloud.com" placeholder="e.g. google.com, tracker.hdtvcloud.com" style="flex:1; min-width:220px; font-family:ui-monospace, monospace;">
-      <select id="test-type-select">
+    <div style="display:flex; gap:8px; margin-bottom:16px;">
+      <input type="text" id="test-domain-input" placeholder="e.g. google.com or doubleclick.net" value="www.xvideos.com" style="flex:1; padding:10px 14px; border-radius:8px; border:1px solid var(--card-border); background:#070a11; color:#fff; font-family:ui-monospace, monospace; font-size:13px; outline:none;" onkeydown="if(event.key==='Enter') runDnsTest()">
+      <select id="test-type-select" style="background:#1f2937; border:1px solid var(--card-border); color:var(--foreground); padding:0 12px; border-radius:8px; font-size:12px; outline:none;">
         <option value="A">A</option>
         <option value="AAAA">AAAA</option>
+        <option value="HTTPS">HTTPS</option>
         <option value="TXT">TXT</option>
         <option value="PTR">PTR</option>
-        <option value="MX">MX</option>
       </select>
-      <button onclick="runDnsTest()" class="primary">
+      <button onclick="runDnsTest()" class="primary" style="padding:0 18px;">
         <span>⚡</span> Run Query
       </button>
     </div>
@@ -597,15 +616,6 @@
 
   <!-- TAB 4: Configuration TOML -->
   <div id="view-config" class="tab-view">
-    <!-- Lock / Security banner -->
-    <div id="editor-lock-banner" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-      <div style="color:#fbbf24; display:flex; align-items:center; gap:8px;">
-        <span style="font-size:16px;">🔒</span>
-        <span id="editor-lock-banner-text"><strong>Configuration Editor is locked in Read-Only mode.</strong> Admin Auth Token is required to edit and save changes.</span>
-      </div>
-      <button onclick="openAuthModal()" id="btn-editor-unlock" style="background:var(--amber); color:#000; border:none; padding:5px 12px; font-weight:700; border-radius:6px; cursor:pointer;">Unlock Editor</button>
-    </div>
-
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
       <div>
         <div style="font-weight:700; font-size:14px;" id="config-path-title">Active Configuration File (/data/controld/ctrld.toml)</div>
@@ -615,11 +625,11 @@
         </div>
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
-        <button onclick="discardConfigChanges()" id="btn-discard-config" style="padding:6px 12px; font-size:12px;" disabled>
+        <button onclick="discardConfigChanges()" id="btn-discard-config" style="padding:6px 12px; font-size:12px;">
           <span>↺</span> Discard
         </button>
-        <button onclick="saveConfig()" id="btn-save-config" class="primary" style="padding:6px 14px; font-size:12px; background:var(--emerald); border-color:var(--emerald); opacity:0.6; cursor:not-allowed;" disabled>
-          <span>🔒</span> Save & Apply (Locked)
+        <button onclick="saveConfig()" id="btn-save-config" class="primary" style="padding:6px 14px; font-size:12px; background:var(--emerald); border-color:var(--emerald);">
+          <span>💾</span> Save & Apply
         </button>
       </div>
     </div>
@@ -628,7 +638,7 @@
     <div id="config-error-banner" style="display:none; padding:10px 14px; border-radius:8px; background:var(--rose-bg); border:1px solid rgba(244,63,94,0.3); color:#fca5a5; font-family:ui-monospace, monospace; font-size:12px; white-space:pre-wrap; margin-top:12px;"></div>
 
     <!-- TOML Editor Textarea -->
-    <textarea id="toml-editor" spellcheck="false" class="toml-editor" placeholder="Loading configuration..." readonly style="opacity:0.8; margin-top:12px;"></textarea>
+    <textarea id="toml-editor" spellcheck="false" class="toml-editor" placeholder="Loading configuration..." style="margin-top:12px;"></textarea>
 
     <div style="font-size:11px; color:var(--muted-foreground); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
       <span>💡 When saving, <code>ctrld</code> automatically validates TOML syntax, creates a timestamped backup (<code>.bak.timestamp</code>) in <code>/data/controld/</code>, and hot-reloads configuration without network interruption.</span>
@@ -638,268 +648,102 @@
 
 </div>
 
-<!-- Admin Auth Modal -->
-<div id="auth-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
-  <div style="background:var(--card); border:1px solid var(--card-border); border-radius:14px; width:90%; max-width:420px; padding:22px; box-shadow:0 25px 50px rgba(0,0,0,0.8);">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h3 style="font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px;">
-        <span>🔐</span> Admin Authentication
-      </h3>
-      <button onclick="closeAuthModal()" style="background:transparent; border:none; color:var(--muted-foreground); font-size:16px; cursor:pointer; padding:4px;">✕</button>
-    </div>
-    <p style="font-size:12px; color:var(--muted-foreground); margin-bottom:16px; line-height:1.5;">
-      Enter the <strong>auth_token</strong> configured in <code>ctrld.toml</code> to unlock configuration editing, save changes, and manage the ctrld daemon.
-    </p>
-    <div style="margin-bottom:16px;">
-      <input type="password" id="modal-token-input" placeholder="Paste or type auth_token..." style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--card-border); background:#070a11; color:#fff; font-family:ui-monospace, monospace; font-size:13px; outline:none;" onkeydown="if(event.key==='Enter') submitAuthToken()">
-      <div id="modal-auth-error" style="display:none; color:var(--rose); font-size:11px; margin-top:8px; font-weight:600;"></div>
-    </div>
-    <div style="display:flex; justify-content:flex-end; gap:8px;">
-      <button onclick="closeAuthModal()" style="background:#1f2937; color:var(--foreground); padding:8px 14px;">Cancel</button>
-      <button onclick="submitAuthToken()" class="primary" id="btn-modal-unlock" style="padding:8px 16px;">Unlock Admin</button>
-    </div>
-  </div>
-</div>
-
 <div id="toast" class="toast">Notification</div>
 
 <script>
-  let isAdmin = false;
-  let authToken = localStorage.getItem('ctrld_auth_token') || '';
-
-  function getAuthHeaders(includeJson = true) {
-    const h = {};
-    if (includeJson) h['Content-Type'] = 'application/json';
-    if (authToken) {
-      h['X-Auth-Token'] = authToken;
-    }
-    return h;
-  }
-
-  function setAdminState(unlocked) {
-    isAdmin = unlocked;
-    const btnToggle = document.getElementById('btn-auth-toggle');
-    const icon = document.getElementById('auth-status-icon');
-    const text = document.getElementById('auth-status-text');
-    const editor = document.getElementById('toml-editor');
-    const btnSave = document.getElementById('btn-save-config');
-    const btnDiscard = document.getElementById('btn-discard-config');
-    const lockBanner = document.getElementById('editor-lock-banner');
-    const lockText = document.getElementById('editor-lock-banner-text');
-    const btnUnlock = document.getElementById('btn-editor-unlock');
-
-    if (unlocked) {
-      if (btnToggle) {
-        btnToggle.style.background = 'rgba(16, 185, 129, 0.15)';
-        btnToggle.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-        btnToggle.style.color = '#34d399';
-      }
-      if (icon) icon.innerText = '🔓';
-      if (text) text.innerText = 'Admin Unlocked (Lock)';
-
-      if (lockBanner) {
-        lockBanner.style.background = 'rgba(16, 185, 129, 0.12)';
-        lockBanner.style.borderColor = 'rgba(16, 185, 129, 0.3)';
-      }
-      if (lockText) {
-        lockText.innerHTML = '<strong>Admin Mode Unlocked.</strong> Configuration can now be edited and saved.';
-        lockText.parentElement.style.color = '#34d399';
-      }
-      if (btnUnlock) {
-        btnUnlock.innerText = 'Lock';
-        btnUnlock.style.background = '#1f2937';
-        btnUnlock.style.color = 'var(--muted-foreground)';
-        btnUnlock.onclick = lockAdmin;
-      }
-
-      if (editor) {
-        editor.removeAttribute('readonly');
-        editor.style.opacity = '1';
-      }
-      if (btnSave) {
-        btnSave.disabled = false;
-        btnSave.style.opacity = '1';
-        btnSave.style.cursor = 'pointer';
-        btnSave.innerHTML = '<span>💾</span> Save & Apply';
-      }
-      if (btnDiscard) {
-        btnDiscard.disabled = false;
-      }
-
-      loadConfigRaw();
-      loadUpstreams();
-      loadDevices();
-      loadInitialQueries().then(() => connectSSE());
-    } else {
-      if (btnToggle) {
-        btnToggle.style.background = 'rgba(245, 158, 11, 0.15)';
-        btnToggle.style.borderColor = 'rgba(245, 158, 11, 0.4)';
-        btnToggle.style.color = '#fbbf24';
-      }
-      if (icon) icon.innerText = '🔒';
-      if (text) text.innerText = 'Read-Only (Unlock)';
-
-      if (lockBanner) {
-        lockBanner.style.background = 'rgba(245, 158, 11, 0.12)';
-        lockBanner.style.borderColor = 'rgba(245, 158, 11, 0.3)';
-      }
-      if (lockText) {
-        lockText.innerHTML = '<strong>Configuration Editor is locked in Read-Only mode.</strong> Admin Auth Token is required to edit and save changes.';
-        lockText.parentElement.style.color = '#fbbf24';
-      }
-      if (btnUnlock) {
-        btnUnlock.innerText = 'Unlock Editor';
-        btnUnlock.style.background = 'var(--amber)';
-        btnUnlock.style.color = '#000';
-        btnUnlock.onclick = openAuthModal;
-      }
-
-      if (editor) {
-        editor.setAttribute('readonly', 'true');
-        editor.style.opacity = '0.75';
-      }
-      if (btnSave) {
-        btnSave.disabled = true;
-        btnSave.style.opacity = '0.5';
-        btnSave.style.cursor = 'not-allowed';
-        btnSave.innerHTML = '<span>🔒</span> Save & Apply (Locked)';
-      }
-      if (btnDiscard) {
-        btnDiscard.disabled = true;
-      }
-
-      if (sseAbortController) {
-        sseAbortController.abort();
-        sseAbortController = null;
-      }
-      allEvents = [];
-      renderLockedFeed();
-      loadDevices();
-      loadUpstreams();
-      loadConfigRaw();
-    }
-  }
-
-  function openAuthModal() {
-    const modal = document.getElementById('auth-modal');
-    const input = document.getElementById('modal-token-input');
-    const err = document.getElementById('modal-auth-error');
-    if (err) err.style.display = 'none';
-    if (input) {
-      input.value = authToken || '';
-    }
-    if (modal) {
-      modal.style.display = 'flex';
-      setTimeout(() => input && input.focus(), 50);
-    }
-  }
-
-  function closeAuthModal() {
-    const modal = document.getElementById('auth-modal');
-    if (modal) modal.style.display = 'none';
-  }
-
-  function toggleAuthModal() {
-    if (isAdmin) {
-      lockAdmin();
-    } else {
-      openAuthModal();
-    }
-  }
-
-  function lockAdmin() {
-    authToken = '';
-    localStorage.removeItem('ctrld_auth_token');
-    setAdminState(false);
-    showToast('Switched to Read-Only mode');
-  }
-
-  async function submitAuthToken() {
-    const input = document.getElementById('modal-token-input');
-    const err = document.getElementById('modal-auth-error');
-    const token = input ? input.value.trim() : '';
-    if (!token) {
-      if (err) {
-        err.innerText = 'Please enter the auth token';
-        err.style.display = 'block';
-      }
-      return;
-    }
-
-    const btn = document.getElementById('btn-modal-unlock');
-    if (btn) {
-      btn.disabled = true;
-      btn.innerText = 'Verifying...';
-    }
-
-    try {
-      const res = await fetch('/api/verify-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token })
-      });
-      const data = await res.json();
-      if (res.ok && data.valid) {
-        authToken = token;
-        localStorage.setItem('ctrld_auth_token', token);
-        setAdminState(true);
-        closeAuthModal();
-        showToast('Admin mode unlocked successfully');
-      } else {
-        if (err) {
-          err.innerText = data.message || 'Invalid authentication token';
-          err.style.display = 'block';
-        }
-      }
-    } catch(e) {
-      if (err) {
-        err.innerText = 'Verification error: ' + e.message;
-        err.style.display = 'block';
-      }
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.innerText = 'Unlock Admin';
-      }
-    }
-  }
-
-  async function checkInitialAuth() {
-    if (!authToken) {
-      setAdminState(false);
-      return;
-    }
-    try {
-      const res = await fetch('/api/verify-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-        body: JSON.stringify({ token: authToken })
-      });
-      const data = await res.json();
-      if (res.ok && data.valid) {
-        setAdminState(true);
-      } else {
-        authToken = '';
-        localStorage.removeItem('ctrld_auth_token');
-        setAdminState(false);
-      }
-    } catch(e) {
-      setAdminState(false);
-    }
-  }
-
   let isPaused = false;
   let allEvents = [];
   let currentStatusFilter = 'all';
   let totalQueries = 0;
   let totalBlocked = 0;
   let cacheHits = 0;
+  let sseAbortController = null;
+  let originalToml = '';
 
   function showToast(msg) {
     const t = document.getElementById('toast');
     t.innerText = msg;
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  function togglePasswordVisibility() {
+    const p = document.getElementById('login-password');
+    p.type = p.type === 'password' ? 'text' : 'password';
+  }
+
+  function showLogin(notConfigured = false) {
+    document.getElementById('app-view').style.display = 'none';
+    document.getElementById('login-view').style.display = 'flex';
+    document.getElementById('setup-warning').style.display = notConfigured ? 'block' : 'none';
+    if (sseAbortController) {
+      sseAbortController.abort();
+      sseAbortController = null;
+    }
+  }
+
+  function showApp() {
+    document.getElementById('login-view').style.display = 'none';
+    document.getElementById('app-view').style.display = 'flex';
+    refreshStatus();
+    loadDevices();
+    loadInitialQueries().then(() => connectSSE());
+  }
+
+  async function checkAuthAndInit() {
+    try {
+      const res = await fetch('/api/auth-check');
+      const data = await res.json();
+      if (res.ok && data.authenticated) {
+        showApp();
+      } else {
+        showLogin(data.configured === false);
+      }
+    } catch(e) {
+      showLogin(false);
+    }
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    const passInput = document.getElementById('login-password');
+    const errBox = document.getElementById('login-error');
+    const btn = document.getElementById('btn-login-submit');
+
+    errBox.style.display = 'none';
+    btn.disabled = true;
+    btn.innerHTML = '<span>Verifying...</span>';
+
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: passInput.value })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        passInput.value = '';
+        showApp();
+        showToast('Logged in successfully');
+      } else {
+        errBox.innerText = data.message || 'Invalid password';
+        errBox.style.display = 'block';
+      }
+    } catch(err) {
+      errBox.innerText = 'Connection error: ' + err.message;
+      errBox.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span>Sign In</span>';
+    }
+  }
+
+  async function logout() {
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+    } catch(e) {}
+    showToast('Logged out');
+    showLogin(false);
   }
 
   function switchTab(tabId) {
@@ -990,14 +834,12 @@
     totalQueries++;
     if (ev.blocked) totalBlocked++;
     if (ev.status === 'CACHED') cacheHits++;
-    updateCounters();
 
     allEvents.unshift(ev);
     if (allEvents.length > 500) allEvents.pop();
 
     if (isPaused) return;
 
-    // Check active filters
     const search = document.getElementById('query-search').value.toLowerCase().trim();
     const devFilter = document.getElementById('dev-filter').value;
     if (currentStatusFilter === 'blocked' && !ev.blocked) return;
@@ -1009,22 +851,17 @@
     renderRow(ev, true);
   }
 
-  function updateCounters() {
-    document.getElementById('stat-total-count').innerText = totalQueries.toLocaleString();
-    document.getElementById('stat-block-count').innerText = totalBlocked.toLocaleString();
-    if (totalQueries > 0) {
-      const blkPct = ((totalBlocked / totalQueries) * 100).toFixed(1);
-      document.getElementById('stat-block-pct').innerText = `${blkPct}%`;
-      const hitPct = ((cacheHits / totalQueries) * 100).toFixed(1);
-      document.getElementById('stat-cache-ratio').innerText = `${hitPct}%`;
-    }
-  }
-
-  function togglePause() {
+  function togglePauseStream() {
     isPaused = !isPaused;
-    document.getElementById('icon-pause').innerText = isPaused ? '▶️' : '⏸️';
-    document.getElementById('label-pause').innerText = isPaused ? 'Resume' : 'Pause';
-    showToast(isPaused ? 'Query stream paused' : 'Query stream resumed');
+    const btn = document.getElementById('btn-pause');
+    if (isPaused) {
+      btn.innerHTML = '<span>▶</span> Resume';
+      btn.style.color = '#fbbf24';
+    } else {
+      btn.innerHTML = '<span>⏸</span> Pause';
+      btn.style.color = 'var(--foreground)';
+      filterFeed();
+    }
   }
 
   function clearTable() {
@@ -1034,19 +871,12 @@
   }
 
   async function flushCache() {
-    if (!isAdmin) {
-      showToast('Admin token required to flush cache');
-      openAuthModal();
-      return;
-    }
     const btn = document.getElementById('btn-flush');
     btn.innerHTML = '<span>⏳</span> Flushing...';
     try {
-      const res = await fetch('/api/flush-cache', { method: 'POST', headers: getAuthHeaders(false) });
+      const res = await fetch('/api/flush-cache', { method: 'POST' });
       if (res.status === 401) {
-        setAdminState(false);
-        showToast('Unauthorized: invalid admin token');
-        openAuthModal();
+        showLogin();
         return;
       }
       const data = await res.json();
@@ -1061,19 +891,12 @@
   }
 
   async function restartService() {
-    if (!isAdmin) {
-      showToast('Admin token required to restart service');
-      openAuthModal();
-      return;
-    }
     const btn = document.getElementById('btn-restart');
     btn.innerHTML = '<span>⏳</span> Restarting...';
     try {
-      const res = await fetch('/api/restart', { method: 'POST', headers: getAuthHeaders(false) });
+      const res = await fetch('/api/restart', { method: 'POST' });
       if (res.status === 401) {
-        setAdminState(false);
-        showToast('Unauthorized: invalid admin token');
-        openAuthModal();
+        showLogin();
         return;
       }
       showToast('ctrld service restarted');
@@ -1095,13 +918,16 @@
     box.innerHTML = '<div style="color:#60a5fa;">Querying local ctrld (:5354)...</div>';
     try {
       const res = await fetch(`/api/test-dns?name=${encodeURIComponent(domain)}&type=${qtype}`);
+      if (res.status === 401) {
+        showLogin();
+        return;
+      }
       const data = await res.json();
 
       let banner = '';
       let detailsHtml = '';
 
       if (data.blocked) {
-        // CASE 1: Blocked by NextDNS / Adblock / Category Rule
         banner = `<div style="color:var(--rose); font-weight:700; font-size:13px; margin-bottom:6px;">✖ STATUS: BLOCKED BY NEXTDNS</div>`;
         detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
         if (data.block_reason) {
@@ -1113,35 +939,28 @@
           detailsHtml += `<div style="color:var(--muted-foreground); margin-top:3px;">Returned Answer: NODATA (0 records returned due to policy filtering)</div>`;
         }
       } else if (data.rcode === 'NOERROR' && data.answers && data.answers.length > 0) {
-        // CASE 2: Allowed and resolved
         banner = `<div style="color:var(--emerald); font-weight:700; font-size:13px; margin-bottom:6px;">✔ STATUS: NOERROR (ALLOWED & RESOLVED)</div>`;
         detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
         detailsHtml += `<div style="color:var(--foreground); margin-top:3px;">Answers:<br>&nbsp;&nbsp;${data.answers.join('<br>&nbsp;&nbsp;')}</div>`;
       } else if (data.rcode === 'NXDOMAIN') {
-        // CASE 3: Legitimate NXDOMAIN (domain does not exist)
         banner = `<div style="color:var(--amber); font-weight:700; font-size:13px; margin-bottom:6px;">ℹ STATUS: NXDOMAIN (DOMAIN DOES NOT EXIST)</div>`;
         detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
         detailsHtml += `<div style="color:var(--muted-foreground); margin-top:3px;">The requested domain is not registered or does not exist on authoritative root DNS servers.</div>`;
       } else if (data.rcode === 'NOERROR' && (!data.answers || data.answers.length === 0)) {
-        // CASE 4: NODATA without block (name exists, but no record of requested type)
         banner = `<div style="color:#60a5fa; font-weight:700; font-size:13px; margin-bottom:6px;">ℹ STATUS: NOERROR / NODATA (NO ${data.type} RECORDS CONFIGURED)</div>`;
         detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
         detailsHtml += `<div style="color:var(--muted-foreground); margin-top:3px;">The domain exists, but has no records configured for type ${data.type}.</div>`;
       } else {
-        // CASE 5: Other RCODE (SERVFAIL, REFUSED, etc.)
         banner = `<div style="color:var(--amber); font-weight:700; font-size:13px; margin-bottom:6px;">⚠ STATUS: ${data.rcode}</div>`;
         detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
       }
 
-      detailsHtml += `<div style="color:var(--muted-foreground); font-size:11px; margin-top:6px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">Server: 192.168.1.1:5354 (ctrld v3.18) • RTT: ${data.latency_ms} ms • RCODE: ${data.rcode}</div>`;
-
+      detailsHtml += `<div style="color:var(--muted-foreground); font-size:11px; margin-top:6px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">Server: 192.168.1.1:5354 (ctrld v3.19) • RTT: ${data.latency_ms} ms • RCODE: ${data.rcode}</div>`;
       box.innerHTML = banner + detailsHtml;
     } catch(e) {
       box.innerHTML = `<div style="color:var(--rose); font-weight:700;">Query error: ${e.message}</div>`;
     }
   }
-
-  let originalToml = '';
 
   async function loadConfigRaw() {
     const editor = document.getElementById('toml-editor');
@@ -1149,23 +968,10 @@
     const errBanner = document.getElementById('config-error-banner');
     if (errBanner) errBanner.style.display = 'none';
 
-    if (!isAdmin) {
-      originalToml = `# 🔒 CONFIGURATION PROTECTED (READ ACCESS RESTRICTED)
-# File: /data/controld/ctrld.toml (0600 root:root)
-#
-# Viewing and editing this file is restricted because it contains sensitive
-# upstream endpoints, network policies, and security tokens.
-#
-# Click "Unlock Editor" above or enter your Admin Auth Token to view and edit this configuration.`;
-      editor.value = originalToml;
-      updateConfigStatusBadge();
-      return;
-    }
-
     try {
-      const res = await fetch('/api/config-raw', { headers: getAuthHeaders(false) });
+      const res = await fetch('/api/config-raw');
       if (res.status === 401) {
-        setAdminState(false);
+        showLogin();
         return;
       }
       const data = await res.json();
@@ -1200,11 +1006,6 @@
   }
 
   async function saveConfig() {
-    if (!isAdmin) {
-      showToast('Admin token required to save configuration');
-      openAuthModal();
-      return;
-    }
     const editor = document.getElementById('toml-editor');
     const btn = document.getElementById('btn-save-config');
     const errBanner = document.getElementById('config-error-banner');
@@ -1216,13 +1017,11 @@
     try {
       const res = await fetch('/api/config-save', {
         method: 'POST',
-        headers: getAuthHeaders(true),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: editor.value })
       });
       if (res.status === 401) {
-        setAdminState(false);
-        showToast('Unauthorized: invalid admin token');
-        openAuthModal();
+        showLogin();
         return;
       }
       const data = await res.json();
@@ -1244,30 +1043,18 @@
       errBanner.style.display = 'block';
       showToast('Error connecting to server');
     } finally {
-      if (isAdmin) {
-        btn.disabled = false;
-        btn.innerHTML = '<span>💾</span> Save & Apply';
-      }
+      btn.disabled = false;
+      btn.innerHTML = '<span>💾</span> Save & Apply';
     }
   }
 
   async function loadUpstreams() {
     const container = document.getElementById('upstreams-list');
     if (!container) return;
-    if (!isAdmin) {
-      container.innerHTML = `
-        <div style="text-align:center; padding:36px 16px; color:var(--muted-foreground); border:1px solid var(--card-border); border-radius:12px; background:rgba(11,15,25,0.5);">
-          <div style="font-size:20px; margin-bottom:8px;">🔒</div>
-          <div style="font-weight:700; font-size:13px; color:var(--foreground); margin-bottom:4px;">Upstream Chain Details are Protected</div>
-          <div style="font-size:11px; margin-bottom:14px;">Admin authentication required to view upstream endpoints, failover order, and credentials.</div>
-          <button onclick="openAuthModal()" style="background:var(--amber); color:#000; font-weight:700; border:none; padding:6px 14px; border-radius:6px; cursor:pointer;">Unlock Upstreams</button>
-        </div>`;
-      return;
-    }
     try {
-      const res = await fetch('/api/upstreams', { headers: getAuthHeaders(false) });
+      const res = await fetch('/api/upstreams');
       if (res.status === 401) {
-        setAdminState(false);
+        showLogin();
         return;
       }
       const list = await res.json();
@@ -1313,14 +1100,10 @@
   async function loadDevices() {
     const sel = document.getElementById('dev-filter');
     if (!sel) return;
-    if (!isAdmin) {
-      sel.innerHTML = '<option value="all">Protected (Admin required)</option>';
-      return;
-    }
     try {
-      const res = await fetch('/api/devices', { headers: getAuthHeaders(false) });
+      const res = await fetch('/api/devices');
       if (res.status === 401) {
-        setAdminState(false);
+        showLogin();
         return;
       }
       const list = await res.json();
@@ -1343,6 +1126,10 @@
   async function refreshStatus() {
     try {
       const res = await fetch('/api/status');
+      if (res.status === 401) {
+        showLogin();
+        return;
+      }
       if (!res.ok) return;
       const data = await res.json();
       if (data.version) document.getElementById('hdr-version').innerText = data.version;
@@ -1362,10 +1149,7 @@
     }
   }
 
-  let sseAbortController = null;
-
   async function connectSSE() {
-    if (!isAdmin || !authToken) return;
     if (sseAbortController) {
       sseAbortController.abort();
     }
@@ -1373,12 +1157,11 @@
 
     try {
       const response = await fetch('/api/stream', {
-        headers: getAuthHeaders(false),
         signal: sseAbortController.signal
       });
 
       if (response.status === 401) {
-        setAdminState(false);
+        showLogin();
         return;
       }
 
@@ -1404,37 +1187,20 @@
         }
       }
     } catch (err) {
-      if (err.name !== 'AbortError' && isAdmin) {
+      if (err.name !== 'AbortError') {
         setTimeout(connectSSE, 3000);
       }
     }
   }
 
-  function renderLockedFeed() {
-    const tbody = document.getElementById('feed-tbody');
-    if (!tbody) return;
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="6" style="text-align:center; padding:44px 16px; color:var(--muted-foreground);">
-          <div style="font-size:24px; margin-bottom:8px;">🔒</div>
-          <div style="font-weight:700; font-size:14px; color:var(--foreground); margin-bottom:6px;">Live Query Telemetry is Protected</div>
-          <div style="font-size:12px; max-width:440px; margin:0 auto 16px auto; line-height:1.5;">Admin authentication is required to inspect real-time DNS queries and network client device activity.</div>
-          <button onclick="openAuthModal()" style="background:var(--amber); color:#000; font-weight:700; border:none; padding:7px 16px; border-radius:8px; cursor:pointer; font-size:12px;">Unlock Live Stream</button>
-        </td>
-      </tr>`;
-  }
-
   async function loadInitialQueries() {
-    if (!isAdmin) {
-      renderLockedFeed();
-      return;
-    }
     try {
-      const res = await fetch('/api/queries?limit=100', { headers: getAuthHeaders(false) });
-      if (!res.ok) {
-        if (res.status === 401) setAdminState(false);
+      const res = await fetch('/api/queries?limit=100');
+      if (res.status === 401) {
+        showLogin();
         return;
       }
+      if (!res.ok) return;
       const list = await res.json();
       allEvents = [];
       const tbody = document.getElementById('feed-tbody');
@@ -1448,17 +1214,9 @@
   }
 
   // Init
-  checkInitialAuth().then(() => {
-    if (!isAdmin) {
-      renderLockedFeed();
-      loadUpstreams();
-      loadConfigRaw();
-      loadDevices();
-    }
-  });
-  refreshStatus();
+  checkAuthAndInit();
   setInterval(refreshStatus, 4000);
-  setInterval(() => { if (isAdmin) loadDevices(); }, 15000);
+  setInterval(loadDevices, 15000);
 
   const tomlTextarea = document.getElementById('toml-editor');
   if (tomlTextarea) {

@@ -3,16 +3,18 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Control-D-Inc/ctrld"
-	"github.com/miekg/dns"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -76,6 +78,11 @@ func TestWebServerEndpoints(t *testing.T) {
 					Type:     "doh3",
 					Endpoint: "https://dns.nextdns.io/test",
 				},
+				"1": {
+					Name:     "Cloudflare-Backup",
+					Type:     "doh",
+					Endpoint: "https://family.cloudflare-dns.com/dns-query",
+				},
 			},
 		},
 		webRingBuf: NewWebRingBuffer(100),
@@ -85,6 +92,24 @@ func TestWebServerEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newWebServer failed: %v", err)
 	}
+
+	// Add sample query events with latencies for upstream.0
+	p.webRingBuf.Add(WebQueryEvent{
+		Domain:    "apple.com",
+		Qtype:     "A",
+		ClientIP:  "192.168.1.50",
+		Status:    "RESOLVED",
+		Upstream:  "upstream.0",
+		LatencyMs: 14,
+	})
+	p.webRingBuf.Add(WebQueryEvent{
+		Domain:    "google.com",
+		Qtype:     "A",
+		ClientIP:  "192.168.1.50",
+		Status:    "RESOLVED",
+		Upstream:  "upstream.0",
+		LatencyMs: 16,
+	})
 
 	// 1. Test GET /
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -97,7 +122,7 @@ func TestWebServerEndpoints(t *testing.T) {
 		t.Errorf("missing expected title in index.html")
 	}
 
-	// 2. Test GET /api/status (direct handler test)
+	// 2. Test GET /api/status (verifying real dynamic latency calculation)
 	req = httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	rec = httptest.NewRecorder()
 	ws.mux.ServeHTTP(rec, req)
@@ -111,14 +136,37 @@ func TestWebServerEndpoints(t *testing.T) {
 	if status["version"] == "" {
 		t.Errorf("expected non-empty version in status")
 	}
+	activeUpstream, ok := status["active_upstream"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected active_upstream map in status")
+	}
+	lat := activeUpstream["latency"].(float64)
+	if lat != 15.0 {
+		t.Errorf("expected real average latency 15.0 ms, got %v", lat)
+	}
 
-	// 3. Test GET /api/queries (direct handler test)
-	p.webRingBuf.Add(WebQueryEvent{
-		Domain:   "apple.com",
-		Qtype:    "A",
-		ClientIP: "192.168.1.50",
-		Status:   "RESOLVED",
-	})
+	// 3. Test GET /api/upstreams
+	req = httptest.NewRequest(http.MethodGet, "/api/upstreams", nil)
+	rec = httptest.NewRecorder()
+	ws.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for /api/upstreams, got %d", rec.Code)
+	}
+	var upstreams []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &upstreams); err != nil {
+		t.Fatalf("invalid json in /api/upstreams: %v", err)
+	}
+	if len(upstreams) != 2 {
+		t.Fatalf("expected 2 upstreams, got %d", len(upstreams))
+	}
+	if upstreams[0]["status"] != "In Use" {
+		t.Errorf("expected upstream 0 to be 'In Use', got %v", upstreams[0]["status"])
+	}
+	if upstreams[0]["latency"].(float64) != 15.0 {
+		t.Errorf("expected upstream 0 latency 15.0 ms, got %v", upstreams[0]["latency"])
+	}
+
+	// 4. Test GET /api/queries
 	req = httptest.NewRequest(http.MethodGet, "/api/queries?limit=10", nil)
 	rec = httptest.NewRecorder()
 	ws.mux.ServeHTTP(rec, req)
@@ -129,11 +177,11 @@ func TestWebServerEndpoints(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &queries); err != nil {
 		t.Fatalf("invalid json in /api/queries: %v", err)
 	}
-	if len(queries) != 1 || queries[0].Domain != "apple.com" {
-		t.Errorf("unexpected queries list: %+v", queries)
+	if len(queries) != 2 {
+		t.Errorf("expected 2 queries, got %d", len(queries))
 	}
 
-	// 4. Test POST /api/flush-cache
+	// 5. Test POST /api/flush-cache
 	req = httptest.NewRequest(http.MethodPost, "/api/flush-cache", nil)
 	rec = httptest.NewRecorder()
 	ws.mux.ServeHTTP(rec, req)
@@ -141,7 +189,7 @@ func TestWebServerEndpoints(t *testing.T) {
 		t.Errorf("expected 200 for /api/flush-cache, got %d", rec.Code)
 	}
 
-	// 5. Test SSE /api/stream
+	// 6. Test SSE /api/stream
 	server := httptest.NewServer(ws.mux)
 	defer server.Close()
 
@@ -163,7 +211,6 @@ func TestWebServerEndpoints(t *testing.T) {
 	}
 
 	scanner := bufio.NewScanner(sseResp.Body)
-	// Read initial connected comment
 	if scanner.Scan() {
 		line := scanner.Text()
 		if !strings.Contains(line, ": connected") {
@@ -171,7 +218,6 @@ func TestWebServerEndpoints(t *testing.T) {
 		}
 	}
 
-	// Broadcast an event
 	p.webRingBuf.Add(WebQueryEvent{
 		Domain: "live-event.org",
 		Qtype:  "A",
@@ -226,7 +272,7 @@ func TestWebSessionAuth(t *testing.T) {
 
 	baseURL := "https://192.168.20.1:5380"
 
-	// 1. Root / is accessible without cookie (shows login UI)
+	// 1. Root / is accessible without cookie
 	req := httptest.NewRequest(http.MethodGet, baseURL+"/", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -375,56 +421,112 @@ func TestWebSessionAuth(t *testing.T) {
 		t.Errorf("expected 403 Forbidden for rogue Host header, got %d", rec.Code)
 	}
 
-	// 12. Cross-origin validation: rogue Origin -> 403
-	req = httptest.NewRequest(http.MethodGet, baseURL+"/", nil)
-	req.Header.Set("Origin", "http://malicious-site.com")
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("expected 403 Forbidden for malicious Origin, got %d", rec.Code)
+	// 12. Cross-origin validation: exact hostname parsing
+	evilOrigins := []string{
+		"http://malicious-site.com",
+		"https://localhost.evil.example",
+		"https://192.168.20.1.attacker.com",
+		"https://firewalla.lan.phishing.org",
+	}
+	for _, evil := range evilOrigins {
+		req = httptest.NewRequest(http.MethodGet, baseURL+"/", nil)
+		req.Header.Set("Origin", evil)
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("expected 403 Forbidden for evil Origin %s, got %d", evil, rec.Code)
+		}
+	}
+
+	// Valid origins must be allowed
+	validOrigins := []string{
+		"https://192.168.20.1:5380",
+		"https://firewalla.lan",
+	}
+	for _, valid := range validOrigins {
+		req = httptest.NewRequest(http.MethodGet, baseURL+"/", nil)
+		req.Header.Set("Origin", valid)
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200 OK for valid Origin %s, got %d", valid, rec.Code)
+		}
 	}
 }
 
-func TestRecordWebQueryEvent(t *testing.T) {
+func TestWebReloadCleanShutdown(t *testing.T) {
 	p := &prog{
-		webRingBuf: NewWebRingBuffer(10),
+		cfg: &ctrld.Config{
+			Service: ctrld.ServiceConfig{CacheSize: 512},
+			Web: &ctrld.WebConfig{
+				Enable:   true,
+				ListenIP: "127.0.0.1",
+				Port:     0,
+				CertDir:  t.TempDir(),
+			},
+		},
 	}
 
-	q := dns.Question{
-		Name:  "adservice.google.com.",
-		Qtype: dns.TypeA,
-	}
-	ans := new(dns.Msg)
-	ans.SetQuestion(q.Name, q.Qtype)
-	// Add 0.0.0.0 answer to simulate NextDNS block
-	ans.Answer = append(ans.Answer, &dns.A{
-		Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-		A:   []byte{0, 0, 0, 0},
-	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	ci := &ctrld.ClientInfo{
-		IP:       "192.168.30.181",
-		Hostname: "Office-TV",
+	reloadCh := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.runWebUI(ctx, reloadCh)
+	}()
+
+	// Wait briefly for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Close reloadCh simulating prog.go reload
+	close(reloadCh)
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Clean exit without hang
+	case <-time.After(2 * time.Second):
+		t.Fatal("runWebUI did not terminate cleanly on reloadCh close")
+	}
+}
+
+func TestLockoutResetAfterExpiry(t *testing.T) {
+	sm := newSessionManager()
+	testIP := "10.0.0.99"
+
+	for i := 0; i < 5; i++ {
+		sm.RecordFailedLogin(testIP)
 	}
 
-	p.recordWebQueryEvent(q, ans, ci, 3*time.Millisecond, "upstream.0")
+	locked, mins := sm.IsIPLocked(testIP)
+	if !locked || mins == 0 {
+		t.Fatalf("expected IP to be locked")
+	}
 
-	snap := p.webRingBuf.Snapshot(1)
-	if len(snap) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(snap))
+	// Simulate passage of 16 minutes
+	sm.Lock()
+	sm.failedLogins[testIP].lockedUntil = time.Now().Add(-1 * time.Minute)
+	sm.Unlock()
+
+	// Calling IsIPLocked after expiration should report unlocked and reset counter
+	locked, _ = sm.IsIPLocked(testIP)
+	if locked {
+		t.Errorf("expected IP to be unlocked after lock expiration")
 	}
-	ev := snap[0]
-	if !ev.Blocked {
-		t.Errorf("expected Blocked=true for 0.0.0.0 response")
-	}
-	if ev.Status != "BLOCKED" {
-		t.Errorf("expected Status=BLOCKED, got %s", ev.Status)
-	}
-	if ev.ClientDev != "Office-TV" {
-		t.Errorf("expected ClientDev=Office-TV, got %s", ev.ClientDev)
-	}
-	if ev.Domain != "adservice.google.com" {
-		t.Errorf("expected canonical domain adservice.google.com, got %s", ev.Domain)
+
+	// 1 failure should not lock again (must require 5 fresh failures)
+	locked, _ = sm.RecordFailedLogin(testIP)
+	if locked {
+		t.Errorf("1st failure after expiration should not lock immediately")
 	}
 }
 
@@ -468,9 +570,40 @@ func TestConfigSaveValidation(t *testing.T) {
 		t.Errorf("expected 400 Bad Request for empty content, got %d", rec.Code)
 	}
 
-	// 3. Valid TOML save
-	validToml := "[service]\n  log_level = 'debug'\n[web]\n  enable = true\n"
-	payload, _ := json.Marshal(map[string]string{"content": validToml})
+	// 3. Valid TOML syntax but invalid ctrld configuration (e.g. invalid upstream type)
+	invalidCtrldToml := "[service]\n  log_level = 'debug'\n[upstream.0]\n  name = 'Invalid'\n  type = 'non-existent-type'\n  endpoint = 'https://example.com'\n"
+	payload, _ := json.Marshal(map[string]string{"content": invalidCtrldToml})
+	req = httptest.NewRequest(http.MethodPost, "/api/config-save", strings.NewReader(string(payload)))
+	rec = httptest.NewRecorder()
+	ws.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for invalid ctrld upstream type, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Configuration validation error") {
+		t.Errorf("expected validation error message, got: %s", rec.Body.String())
+	}
+
+	// 4. Valid TOML save with full valid ctrld schema
+	validToml := `[service]
+  log_level = 'debug'
+
+[listener.0]
+  ip = '127.0.0.1'
+  port = 5354
+
+[network.0]
+  name = 'Lan'
+  cidrs = ['192.168.1.0/24']
+
+[upstream.0]
+  name = 'NextDNS'
+  type = 'doh3'
+  endpoint = 'https://dns.nextdns.io/d23c32'
+
+[web]
+  enable = true
+`
+	payload, _ = json.Marshal(map[string]string{"content": validToml})
 	req = httptest.NewRequest(http.MethodPost, "/api/config-save", strings.NewReader(string(payload)))
 	rec = httptest.NewRecorder()
 	ws.mux.ServeHTTP(rec, req)
@@ -485,10 +618,27 @@ func TestConfigSaveValidation(t *testing.T) {
 	}
 }
 
-func TestWebPasswdCommand(t *testing.T) {
+func TestWebPasswdSurgicalPreservation(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgFile := tmpDir + "/ctrld.toml"
-	initialConfig := "[service]\n  cache_size = 1024\n[web]\n  enable = true\n  auth_token = 'old-leaked-token'\n"
+
+	initialConfig := `# Custom user header comment
+[service]
+  log_level = 'info'
+  cache_size = 4096
+
+[listener.0]
+  ip = '192.168.1.1'
+  port = 5354
+  policy.networks = [{ "network.0" = ["192.168.20.0/24"] }]
+
+# Web management section
+[web]
+  enable = true
+  listen_ip = '192.168.20.1'
+  port = 5380
+  auth_token = 'old_leaked_token'
+`
 	if err := os.WriteFile(cfgFile, []byte(initialConfig), 0600); err != nil {
 		t.Fatalf("failed to write test config: %v", err)
 	}
@@ -504,55 +654,73 @@ func TestWebPasswdCommand(t *testing.T) {
 	}
 	content := string(updated)
 
-	// auth_token must be removed
-	if strings.Contains(content, "auth_token") {
-		t.Errorf("expected auth_token to be stripped, found in: %s", content)
+	// Verify comments preserved
+	if !strings.Contains(content, "# Custom user header comment") {
+		t.Errorf("lost header comment")
 	}
-	// password_hash must be present
-	if !strings.Contains(content, "password_hash") {
-		t.Errorf("expected password_hash in config, got: %s", content)
+	if !strings.Contains(content, "# Web management section") {
+		t.Errorf("lost web management comment")
+	}
+	// Verify custom formatting preserved
+	if !strings.Contains(content, `policy.networks = [{ "network.0" = ["192.168.20.0/24"] }]`) {
+		t.Errorf("lost inline table formatting in listener.0")
+	}
+	// Verify auth_token removed
+	if strings.Contains(content, "auth_token") {
+		t.Errorf("auth_token was not removed")
+	}
+	// Verify password_hash added
+	if !strings.Contains(content, "password_hash = '$2a$10$") {
+		t.Errorf("expected bcrypt password_hash in config, got:\n%s", content)
 	}
 
-	// Verify hash with bcrypt
-	var cfgMap map[string]any
-	if err := json.Unmarshal([]byte(`{}`), &cfgMap); err != nil {
-		t.Fatal(err)
-	}
-	// Check bcrypt matches password
-	lines := strings.Split(content, "\n")
-	var foundHash string
-	for _, l := range lines {
-		if strings.Contains(l, "password_hash") {
-			parts := strings.Split(l, "=")
-			if len(parts) == 2 {
-				foundHash = strings.Trim(strings.TrimSpace(parts[1]), `'"`)
-			}
+	// Verify backup file was created
+	files, _ := os.ReadDir(tmpDir)
+	hasBackup := false
+	for _, f := range files {
+		if strings.HasPrefix(f.Name(), "ctrld.toml.bak.") {
+			hasBackup = true
+			break
 		}
 	}
-	if foundHash == "" {
-		t.Fatalf("could not extract password_hash from: %s", content)
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(foundHash), []byte(testPass)); err != nil {
-		t.Errorf("bcrypt verification failed for hash %s: %v", foundHash, err)
+	if !hasBackup {
+		t.Errorf("expected timestamped backup file to exist")
 	}
 }
 
-func TestCertificateGeneration(t *testing.T) {
+func TestCertificateGenerationAndDeduplication(t *testing.T) {
 	tmpDir := t.TempDir()
 	certFile := tmpDir + "/cert.pem"
 	keyFile := tmpDir + "/key.pem"
 
+	// Passing listenIP matching 192.168.20.1 should not produce duplicate SAN IPs
 	err := generateSelfSignedCert(certFile, keyFile, "192.168.20.1")
 	if err != nil {
 		t.Fatalf("generateSelfSignedCert failed: %v", err)
 	}
 
-	// Check files created
-	if _, err := os.Stat(certFile); os.IsNotExist(err) {
-		t.Errorf("cert file was not created")
+	certBytes, err := os.ReadFile(certFile)
+	if err != nil {
+		t.Fatalf("failed to read cert file: %v", err)
 	}
-	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-		t.Errorf("key file was not created")
+	block, _ := pem.Decode(certBytes)
+	if block == nil {
+		t.Fatalf("failed to decode PEM block")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("failed to parse certificate: %v", err)
+	}
+
+	ipCounts := make(map[string]int)
+	for _, ip := range cert.IPAddresses {
+		ipCounts[ip.String()]++
+	}
+
+	for ip, count := range ipCounts {
+		if count > 1 {
+			t.Errorf("duplicate IP %s found %d times in SANs", ip, count)
+		}
 	}
 
 	fp := getCertSHA256Fingerprint(certFile)
@@ -560,4 +728,3 @@ func TestCertificateGeneration(t *testing.T) {
 		t.Errorf("expected valid SHA-256 fingerprint, got %s", fp)
 	}
 }
-

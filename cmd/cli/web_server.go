@@ -15,9 +15,11 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -54,9 +56,24 @@ func newSessionManager() *sessionManager {
 	}
 }
 
+func (sm *sessionManager) purgeExpiredLocked() {
+	now := time.Now()
+	for sid, lastActive := range sm.sessions {
+		if now.Sub(lastActive) > 12*time.Hour {
+			delete(sm.sessions, sid)
+		}
+	}
+	for ip, att := range sm.failedLogins {
+		if !att.lockedUntil.IsZero() && now.After(att.lockedUntil) {
+			delete(sm.failedLogins, ip)
+		}
+	}
+}
+
 func (sm *sessionManager) CreateSession() (string, error) {
 	sm.Lock()
 	defer sm.Unlock()
+	sm.purgeExpiredLocked()
 
 	b := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
@@ -93,16 +110,21 @@ func (sm *sessionManager) DeleteSession(sid string) {
 }
 
 func (sm *sessionManager) IsIPLocked(ip string) (bool, int) {
-	sm.RLock()
-	defer sm.RUnlock()
+	sm.Lock()
+	defer sm.Unlock()
 
 	att, ok := sm.failedLogins[ip]
 	if !ok {
 		return false, 0
 	}
-	if time.Now().Before(att.lockedUntil) {
+	now := time.Now()
+	if now.Before(att.lockedUntil) {
 		remaining := int(time.Until(att.lockedUntil).Minutes()) + 1
 		return true, remaining
+	}
+	// Lock has expired: reset counter and clean up entry
+	if !att.lockedUntil.IsZero() && now.After(att.lockedUntil) {
+		delete(sm.failedLogins, ip)
 	}
 	return false, 0
 }
@@ -110,11 +132,16 @@ func (sm *sessionManager) IsIPLocked(ip string) (bool, int) {
 func (sm *sessionManager) RecordFailedLogin(ip string) (locked bool, remainingMinutes int) {
 	sm.Lock()
 	defer sm.Unlock()
+	sm.purgeExpiredLocked()
 
 	att, ok := sm.failedLogins[ip]
 	if !ok {
 		att = &loginAttempt{}
 		sm.failedLogins[ip] = att
+	} else if !att.lockedUntil.IsZero() && time.Now().After(att.lockedUntil) {
+		// Reset counter after previous lock expired
+		att.failedCount = 0
+		att.lockedUntil = time.Time{}
 	}
 	att.failedCount++
 	if att.failedCount >= 5 {
@@ -186,10 +213,14 @@ func generateSelfSignedCert(certPath, keyPath string, listenIP string) error {
 		IsCA:                  false,
 	}
 
-	ips := []net.IP{net.ParseIP("192.168.20.1"), net.ParseIP("127.0.0.1")}
-	if listenIP != "" && listenIP != "0.0.0.0" {
-		if parsed := net.ParseIP(listenIP); parsed != nil {
-			ips = append(ips, parsed)
+	ipMap := make(map[string]bool)
+	var ips []net.IP
+	for _, ipStr := range []string{"192.168.20.1", "127.0.0.1", listenIP} {
+		if ipStr != "" && ipStr != "0.0.0.0" && !ipMap[ipStr] {
+			if parsed := net.ParseIP(ipStr); parsed != nil {
+				ipMap[ipStr] = true
+				ips = append(ips, parsed)
+			}
 		}
 	}
 	template.IPAddresses = ips
@@ -343,7 +374,18 @@ func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 		// Cross-origin check
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			if !strings.Contains(origin, expectedHost) && !strings.Contains(origin, "192.168.20.1") && !strings.Contains(origin, "127.0.0.1") && !strings.Contains(origin, "localhost") && !strings.Contains(origin, "firewalla.lan") {
+			u, err := url.Parse(origin)
+			if err != nil {
+				http.Error(w, `{"error":"invalid origin"}`, http.StatusForbidden)
+				return
+			}
+			originHost := u.Hostname()
+			allowedOrigin := originHost == expectedHost ||
+				originHost == "192.168.20.1" ||
+				originHost == "127.0.0.1" ||
+				originHost == "localhost" ||
+				originHost == "firewalla.lan"
+			if !allowedOrigin {
 				http.Error(w, `{"error":"cross-origin forbidden"}`, http.StatusForbidden)
 				return
 			}
@@ -525,16 +567,23 @@ func (ws *webServer) registerRoutes() {
 			cacheItems = ws.p.cache.Len()
 		}
 
+		activeKey := ws.p.getActiveUpstreamKey()
 		activeUpstreamName := "NextDNS"
 		activeUpstreamType := "doh3"
 		activeEndpoint := ""
 		if ws.p.cfg != nil && len(ws.p.cfg.Upstream) > 0 {
-			if u0, ok := ws.p.cfg.Upstream["0"]; ok && u0 != nil {
+			if u, ok := ws.p.cfg.Upstream[activeKey]; ok && u != nil {
+				activeUpstreamName = u.Name
+				activeUpstreamType = u.Type
+				activeEndpoint = u.Endpoint
+			} else if u0, ok := ws.p.cfg.Upstream["0"]; ok && u0 != nil {
 				activeUpstreamName = u0.Name
 				activeUpstreamType = u0.Type
 				activeEndpoint = u0.Endpoint
 			}
 		}
+		rawLat := ws.p.getUpstreamLatency(activeKey)
+		activeLat := math.Round(rawLat*10) / 10
 
 		status := map[string]any{
 			"version":       curVersion(),
@@ -553,7 +602,7 @@ func (ws *webServer) registerRoutes() {
 				"name":     activeUpstreamName,
 				"type":     strings.ToUpper(activeUpstreamType),
 				"endpoint": activeEndpoint,
-				"latency":  2.6,
+				"latency":  activeLat,
 			},
 		}
 		_ = json.NewEncoder(w).Encode(status)
@@ -801,6 +850,7 @@ func (ws *webServer) registerRoutes() {
 				}
 			}
 			sort.Ints(keys)
+			activeKey := ws.p.getActiveUpstreamKey()
 			for _, n := range keys {
 				k := strconv.Itoa(n)
 				u := ws.p.cfg.Upstream[k]
@@ -809,15 +859,18 @@ func (ws *webServer) registerRoutes() {
 				}
 				status := "Standby"
 				role := "Backup"
-				lat := 0.0
-				if n == 0 {
+				if k == activeKey {
 					status = "In Use"
+				}
+				if n == 0 {
 					role = "Primary"
-					lat = 2.6
 				} else if u.Type == "legacy" {
-					status = "Last Resort"
+					if status != "In Use" {
+						status = "Last Resort"
+					}
 					role = "ISP Fallback"
 				}
+				lat := math.Round(ws.p.getUpstreamLatency(k)*10) / 10
 				list = append(list, UpstreamInfo{
 					ID:          k,
 					Index:       n + 1,
@@ -913,6 +966,15 @@ func (ws *webServer) registerRoutes() {
 			return
 		}
 
+		if err := validateConfig(&testCfg); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  "error",
+				"message": fmt.Sprintf("Configuration validation error: %s", err.Error()),
+			})
+			return
+		}
+
 		filePath := configPath
 		if filePath == "" {
 			filePath = "/data/controld/ctrld.toml"
@@ -922,7 +984,14 @@ func (ws *webServer) registerRoutes() {
 		var bakPath string
 		if err == nil {
 			bakPath = fmt.Sprintf("%s.bak.%s", filePath, time.Now().Format("20060102_150405"))
-			_ = os.WriteFile(bakPath, oldData, 0600)
+			if err := os.WriteFile(bakPath, oldData, 0600); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"status":  "error",
+					"message": fmt.Sprintf("Could not create configuration backup: %s", err.Error()),
+				})
+				return
+			}
 		}
 
 		tmpFile := filePath + ".tmp"
@@ -1052,25 +1121,57 @@ func (p *prog) runWebUI(ctx context.Context, reloadCh chan struct{}) {
 		return
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			_ = ws.stop()
-			return
-		case <-reloadCh:
-			_ = ws.stop()
-			newWs, err := p.newWebServer()
-			if err != nil {
-				mainLog.Load().Error().Err(err).Msg("failed to recreate Web UI after reload")
-				return
+	select {
+	case <-p.stopCh:
+	case <-ctx.Done():
+	case <-reloadCh:
+	}
+
+	if err := ws.stop(); err != nil {
+		mainLog.Load().Warn().Err(err).Msg("could not stop Web UI server")
+	}
+}
+
+func (p *prog) getUpstreamLatency(upstreamKey string) float64 {
+	if p == nil || p.webRingBuf == nil {
+		return 0
+	}
+	events := p.webRingBuf.Snapshot(100)
+	var sum int64
+	var count int64
+	for _, ev := range events {
+		if ev.Upstream != "cache" && ev.LatencyMs > 0 {
+			match := false
+			if upstreamKey == "" {
+				match = true
+			} else if ev.Upstream == upstreamKey || ev.Upstream == "upstream."+upstreamKey || strings.HasSuffix(ev.Upstream, "."+upstreamKey) {
+				match = true
 			}
-			if err := newWs.start(); err != nil {
-				mainLog.Load().Error().Err(err).Msg("failed to restart Web UI after reload")
-				return
+			if match {
+				sum += ev.LatencyMs
+				count++
+				if count >= 30 {
+					break
+				}
 			}
-			ws = newWs
 		}
 	}
+	if count > 0 {
+		return float64(sum) / float64(count)
+	}
+	return 0
+}
+
+func (p *prog) getActiveUpstreamKey() string {
+	if p != nil && p.webRingBuf != nil {
+		events := p.webRingBuf.Snapshot(20)
+		for _, ev := range events {
+			if ev.Upstream != "cache" && ev.Upstream != "" {
+				return strings.TrimPrefix(ev.Upstream, "upstream.")
+			}
+		}
+	}
+	return "0"
 }
 
 // getProcessRSSMB reads Linux /proc/self/statm resident pages and converts to MB.

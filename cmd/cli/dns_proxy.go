@@ -316,15 +316,20 @@ func (p *prog) serveDNS(listenerNum string) error {
 		labelValues = append(labelValues, dns.RcodeToString[answer.Rcode])
 		// The grade of the window must not depend on the goroutine below.
 		p.health.countQuery()
+		// The Web UI event is built from a copy, because w.WriteMsg below packs the
+		// same message concurrently. Nothing is copied while the Web UI is off.
+		webActive := p.webActive.Load()
 		var answerCopy *dns.Msg
-		if answer != nil {
+		if webActive && answer != nil {
 			answerCopy = answer.Copy()
 		}
 		go func() {
 			p.WithLabelValuesInc(statsQueriesCount, labelValues...)
 			p.WithLabelValuesInc(statsClientQueriesCount, []string{ci.IP, ci.Mac, ci.Hostname}...)
 			p.forceFetchingAPI(domain)
-			p.recordWebQueryEvent(q, answerCopy, ci, rtt, upstream)
+			if webActive {
+				p.recordWebQueryEvent(q, answerCopy, ci, rtt, upstream)
+			}
 		}()
 		if err := w.WriteMsg(answer); err != nil {
 			ctrld.Log(ctx, p.querySampler.event(sampleClassSendResponseFailed, "").Err(err), "serveDNS: failed to send DNS response to client")

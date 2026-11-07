@@ -102,8 +102,8 @@ func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Mutating / administrative endpoints strictly require token if ws.token is configured
-		adminEndpoints := []string{"/api/config-save", "/api/restart", "/api/flush-cache"}
+		// Mutating / administrative / sensitive endpoints strictly require token if ws.token is configured
+		adminEndpoints := []string{"/api/config-save", "/api/restart", "/api/flush-cache", "/api/config-raw"}
 		for _, ep := range adminEndpoints {
 			if r.URL.Path == ep {
 				if !ws.isAuthorized(r) {

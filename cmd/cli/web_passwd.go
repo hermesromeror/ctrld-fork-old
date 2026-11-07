@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -20,7 +21,8 @@ func initWebPasswdCmd() *cobra.Command {
 		Use:   "web-passwd",
 		Short: "Set or update the Web UI admin password",
 		Long: `Sets the password_hash in the ctrld configuration file using bcrypt.
-Reads the password interactively from terminal without echoing characters.`,
+Reads the password interactively from terminal without echoing characters,
+or from stdin if input is piped non-interactively.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if cfgPath == "" {
 				cfgPath = configPath
@@ -32,32 +34,44 @@ Reads the password interactively from terminal without echoing characters.`,
 				cfgPath = "/data/controld/ctrld.toml"
 			}
 
-			// Read password interactively without echo
-			fmt.Print("Enter new Web UI password: ")
-			p1, err := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
-				os.Exit(1)
-			}
+			var passStr string
+			if term.IsTerminal(int(os.Stdin.Fd())) {
+				fmt.Print("Enter new Web UI password: ")
+				p1, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+					os.Exit(1)
+				}
+				passStr = strings.TrimSpace(string(p1))
+				if len(passStr) < 8 {
+					fmt.Fprintln(os.Stderr, "Error: password must be at least 8 characters long.")
+					os.Exit(1)
+				}
 
-			passStr := strings.TrimSpace(string(p1))
-			if len(passStr) < 8 {
-				fmt.Fprintln(os.Stderr, "Error: password must be at least 8 characters long.")
-				os.Exit(1)
-			}
-
-			fmt.Print("Confirm new Web UI password: ")
-			p2, err := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reading confirmation: %v\n", err)
-				os.Exit(1)
-			}
-
-			if passStr != strings.TrimSpace(string(p2)) {
-				fmt.Fprintln(os.Stderr, "Error: passwords do not match.")
-				os.Exit(1)
+				fmt.Print("Confirm new Web UI password: ")
+				p2, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error reading confirmation: %v\n", err)
+					os.Exit(1)
+				}
+				if passStr != strings.TrimSpace(string(p2)) {
+					fmt.Fprintln(os.Stderr, "Error: passwords do not match.")
+					os.Exit(1)
+				}
+			} else {
+				// Non-interactive (pipe / redirected stdin)
+				scanner := bufio.NewScanner(os.Stdin)
+				if !scanner.Scan() {
+					fmt.Fprintln(os.Stderr, "Error: failed to read password from stdin")
+					os.Exit(1)
+				}
+				passStr = strings.TrimSpace(scanner.Text())
+				if len(passStr) < 8 {
+					fmt.Fprintln(os.Stderr, "Error: password must be at least 8 characters long.")
+					os.Exit(1)
+				}
 			}
 
 			if err := setWebPasswordInConfigFile(cfgPath, passStr); err != nil {

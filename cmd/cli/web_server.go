@@ -1119,7 +1119,7 @@ func (ws *webServer) registerRoutes() {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 		client := &http.Client{
-			Timeout: 3 * time.Second,
+			Timeout: 4 * time.Second,
 		}
 
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://test.nextdns.io", nil)
@@ -1130,7 +1130,8 @@ func (ws *webServer) registerRoutes() {
 			})
 			return
 		}
-		req.Header.Set("User-Agent", "ctrld-webui/v3.20")
+		req.Header.Set("User-Agent", "curl/7.81.0 ctrld-webui/v3.20")
+		req.Header.Set("Accept", "application/json")
 
 		resp, err := client.Do(req)
 		if err != nil {

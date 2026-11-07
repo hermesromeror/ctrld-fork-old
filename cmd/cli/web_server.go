@@ -38,6 +38,23 @@ import (
 //go:embed web/index.html
 var webIndexHTML []byte
 
+// webProcessStart is when the ctrld process started, for the Web UI uptime.
+var webProcessStart = time.Now()
+
+// formatUptime renders d as "5m", "3h 12m" or "2d 4h 7m".
+func formatUptime(d time.Duration) string {
+	m := int(d.Minutes())
+	days, hours, mins := m/1440, (m/60)%24, m%60
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh %dm", days, hours, mins)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm", hours, mins)
+	default:
+		return fmt.Sprintf("%dm", mins)
+	}
+}
+
 type loginAttempt struct {
 	failedCount int
 	lockedUntil time.Time
@@ -277,6 +294,23 @@ func getCertSHA256Fingerprint(certPath string) string {
 	return strings.Join(parts, ":")
 }
 
+// webSessionManager returns the session manager shared by every Web UI server of
+// this process, so a config save or reload does not log the administrator out.
+// Sessions (and login lockouts) are dropped when the password hash changes.
+func (p *prog) webSessionManager() *sessionManager {
+	hash := ""
+	if p.cfg != nil && p.cfg.Web != nil {
+		hash = p.cfg.Web.PasswordHash
+	}
+	p.webSessionsMu.Lock()
+	defer p.webSessionsMu.Unlock()
+	if p.webSessions == nil || p.webSessionsHash != hash {
+		p.webSessions = newSessionManager()
+		p.webSessionsHash = hash
+	}
+	return p.webSessions
+}
+
 func (p *prog) newWebServer() (*webServer, error) {
 	listenIP := "192.168.20.1"
 	port := 5380
@@ -304,7 +338,7 @@ func (p *prog) newWebServer() (*webServer, error) {
 		listenIP:  listenIP,
 		port:      port,
 		certDir:   certDir,
-		sm:        newSessionManager(),
+		sm:        p.webSessionManager(),
 		startTime: time.Now(),
 	}
 
@@ -550,9 +584,9 @@ func (ws *webServer) registerRoutes() {
 	// GET /api/status
 	ws.mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		uptime := time.Since(ws.startTime)
-		hours := int(uptime.Hours())
-		mins := int(uptime.Minutes()) % 60
+		// Process uptime: does not reset when the config is reloaded.
+		uptime := time.Since(webProcessStart)
+		uptimeStr := formatUptime(uptime)
 
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
@@ -589,7 +623,7 @@ func (ws *webServer) registerRoutes() {
 			"version":       curVersion(),
 			"pid":           os.Getpid(),
 			"uptime_sec":    int64(uptime.Seconds()),
-			"uptime_str":    fmt.Sprintf("%dh %dm", hours, mins),
+			"uptime_str":    uptimeStr,
 			"go_os":         runtime.GOOS,
 			"go_arch":       runtime.GOARCH,
 			"num_goroutine": runtime.NumGoroutine(),
@@ -598,6 +632,7 @@ func (ws *webServer) registerRoutes() {
 			"mem_sys_mb":    float64(m.Sys) / (1024 * 1024),
 			"cache_items":   cacheItems,
 			"cache_size":    ws.p.cfg.Service.CacheSize,
+			"queries":       ws.p.webRingBuf.Stats(),
 			"active_upstream": map[string]any{
 				"name":     activeUpstreamName,
 				"type":     strings.ToUpper(activeUpstreamType),
@@ -983,8 +1018,8 @@ func (ws *webServer) registerRoutes() {
 		oldData, err := os.ReadFile(filePath)
 		var bakPath string
 		if err == nil {
-			bakPath = fmt.Sprintf("%s.bak.%s", filePath, time.Now().Format("20060102_150405"))
-			if err := os.WriteFile(bakPath, oldData, 0600); err != nil {
+			bakPath, err = writeConfigBackup(filePath, oldData)
+			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"status":  "error",
@@ -1120,6 +1155,9 @@ func (p *prog) runWebUI(ctx context.Context, reloadCh chan struct{}) {
 		mainLog.Load().Error().Err(err).Msg("failed to start Web UI server")
 		return
 	}
+	// Record DNS events only while the Web UI is serving, so a disabled UI costs
+	// nothing on the DNS path.
+	p.webActive.Store(true)
 
 	select {
 	case <-p.stopCh:
@@ -1127,33 +1165,54 @@ func (p *prog) runWebUI(ctx context.Context, reloadCh chan struct{}) {
 	case <-reloadCh:
 	}
 
+	p.webActive.Store(false)
 	if err := ws.stop(); err != nil {
 		mainLog.Load().Warn().Err(err).Msg("could not stop Web UI server")
 	}
 }
 
+// isUpstreamEvent reports whether the event was answered by a configured
+// upstream (not the cache, the client info table or another local answer).
+// serveDNS records the upstream's endpoint in WebQueryEvent.Upstream.
+func isUpstreamEvent(ev WebQueryEvent) bool {
+	switch ev.Upstream {
+	case "", "cache", "client_info_table":
+		return false
+	}
+	return true
+}
+
+// upstreamEndpoint returns the endpoint of the configured upstream key ("0", "1", ...).
+func (p *prog) upstreamEndpoint(upstreamKey string) string {
+	if p == nil || p.cfg == nil {
+		return ""
+	}
+	if u, ok := p.cfg.Upstream[upstreamKey]; ok && u != nil {
+		return u.Endpoint
+	}
+	return ""
+}
+
+// getUpstreamLatency returns the mean latency (ms) of the last (up to 30) answers
+// from the upstream with the given key, looking at the last 100 recorded queries.
+// It returns 0 when that upstream has not answered recently.
 func (p *prog) getUpstreamLatency(upstreamKey string) float64 {
 	if p == nil || p.webRingBuf == nil {
 		return 0
 	}
-	events := p.webRingBuf.Snapshot(100)
-	var sum int64
-	var count int64
-	for _, ev := range events {
-		if ev.Upstream != "cache" && ev.LatencyMs > 0 {
-			match := false
-			if upstreamKey == "" {
-				match = true
-			} else if ev.Upstream == upstreamKey || ev.Upstream == "upstream."+upstreamKey || strings.HasSuffix(ev.Upstream, "."+upstreamKey) {
-				match = true
-			}
-			if match {
-				sum += ev.LatencyMs
-				count++
-				if count >= 30 {
-					break
-				}
-			}
+	endpoint := p.upstreamEndpoint(upstreamKey)
+	if endpoint == "" {
+		return 0
+	}
+	var sum, count int64
+	for _, ev := range p.webRingBuf.Snapshot(100) {
+		if !isUpstreamEvent(ev) || ev.Upstream != endpoint {
+			continue
+		}
+		sum += ev.LatencyMs
+		count++
+		if count >= 30 {
+			break
 		}
 	}
 	if count > 0 {
@@ -1162,12 +1221,19 @@ func (p *prog) getUpstreamLatency(upstreamKey string) float64 {
 	return 0
 }
 
+// getActiveUpstreamKey returns the key of the upstream that answered the most
+// recent non-cached, non-local query, or "0" when none is known.
 func (p *prog) getActiveUpstreamKey() string {
-	if p != nil && p.webRingBuf != nil {
-		events := p.webRingBuf.Snapshot(20)
-		for _, ev := range events {
-			if ev.Upstream != "cache" && ev.Upstream != "" {
-				return strings.TrimPrefix(ev.Upstream, "upstream.")
+	if p == nil || p.webRingBuf == nil || p.cfg == nil {
+		return "0"
+	}
+	for _, ev := range p.webRingBuf.Snapshot(20) {
+		if !isUpstreamEvent(ev) {
+			continue
+		}
+		for k, u := range p.cfg.Upstream {
+			if u != nil && u.Endpoint == ev.Upstream {
+				return k
 			}
 		}
 	}

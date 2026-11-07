@@ -34,6 +34,30 @@ type WebRingBuffer struct {
 	count       int
 	nextID      uint64
 	subscribers map[chan WebQueryEvent]struct{}
+
+	// Totals since the process started (all recorded queries, not only the
+	// last size events kept in the buffer).
+	total   uint64
+	blocked uint64
+	cached  uint64
+}
+
+// WebQueryStats are query totals since the process started.
+type WebQueryStats struct {
+	Total   uint64 `json:"total"`
+	Blocked uint64 `json:"blocked"`
+	Allowed uint64 `json:"allowed"`
+	Cached  uint64 `json:"cached"`
+}
+
+// Stats returns the query totals recorded since the process started.
+func (rb *WebRingBuffer) Stats() WebQueryStats {
+	if rb == nil {
+		return WebQueryStats{}
+	}
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+	return WebQueryStats{Total: rb.total, Blocked: rb.blocked, Allowed: rb.total - rb.blocked, Cached: rb.cached}
 }
 
 // NewWebRingBuffer creates a new ring buffer with the given capacity.
@@ -56,6 +80,13 @@ func (rb *WebRingBuffer) Add(ev WebQueryEvent) {
 	rb.mu.Lock()
 	ev.ID = rb.nextID
 	rb.nextID++
+	rb.total++
+	if ev.Blocked {
+		rb.blocked++
+	}
+	if ev.Status == "CACHED" {
+		rb.cached++
+	}
 
 	rb.events[rb.head] = ev
 	rb.head = (rb.head + 1) % rb.size

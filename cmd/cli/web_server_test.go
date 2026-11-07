@@ -99,7 +99,7 @@ func TestWebServerEndpoints(t *testing.T) {
 		Qtype:     "A",
 		ClientIP:  "192.168.1.50",
 		Status:    "RESOLVED",
-		Upstream:  "upstream.0",
+		Upstream:  "https://dns.nextdns.io/test", // serveDNS records the endpoint
 		LatencyMs: 14,
 	})
 	p.webRingBuf.Add(WebQueryEvent{
@@ -107,7 +107,7 @@ func TestWebServerEndpoints(t *testing.T) {
 		Qtype:     "A",
 		ClientIP:  "192.168.1.50",
 		Status:    "RESOLVED",
-		Upstream:  "upstream.0",
+		Upstream:  "https://dns.nextdns.io/test", // serveDNS records the endpoint
 		LatencyMs: 16,
 	})
 

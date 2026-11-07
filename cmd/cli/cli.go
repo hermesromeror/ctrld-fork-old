@@ -255,6 +255,7 @@ func run(appCallback *AppCallback, stopCh chan struct{}) {
 		runAbortCh:       make(chan struct{}),
 		cfg:              &cfg,
 		appCallback:      appCallback,
+		webRingBuf:       NewWebRingBuffer(500),
 	}
 	if homedir == "" {
 		if dir, err := userHomeDir(); err == nil {

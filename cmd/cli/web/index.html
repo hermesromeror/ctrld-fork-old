@@ -275,6 +275,47 @@
       border-radius: 12px;
       background: rgba(11, 15, 25, 0.4);
     }
+    /* Live Feed: fixed-height scroll area with a sticky header */
+    .table-wrap.feed-wrap {
+      max-height: min(63vh, 570px);
+      overflow-y: auto;
+    }
+    /* Fixed layout so column widths are honoured; columns are resizable by
+       dragging the right edge of a header (widths kept per browser). */
+    .feed-wrap table { table-layout: fixed; min-width: 760px; }
+    .feed-wrap th { position: sticky; }
+    .feed-wrap th .col-resizer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 7px;
+      height: 100%;
+      cursor: col-resize;
+      user-select: none;
+    }
+    .feed-wrap th .col-resizer:hover,
+    .feed-wrap th .col-resizer.dragging { background: rgba(96, 165, 250, 0.45); }
+    .cell-clip {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .uptime-pill {
+      font-size: 12px;
+      color: var(--muted-foreground);
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--card-border);
+      background: rgba(11, 15, 25, 0.5);
+      white-space: nowrap;
+    }
+    .uptime-pill b { color: var(--foreground); font-family: ui-monospace, monospace; }
+    .feed-wrap thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #111827;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -449,6 +490,7 @@
       </div>
     </div>
     <div class="header-actions">
+      <span class="uptime-pill" title="ctrld process uptime">⏱ Uptime <b id="stat-uptime">–</b></span>
       <button onclick="flushCache()" id="btn-flush">
         <span>🧹</span> Flush Cache
       </button>
@@ -487,27 +529,27 @@
       </div>
     </div>
 
-    <!-- Card 3: Cache Performance -->
+    <!-- Card 3: Cache Performance (totals since ctrld started) -->
     <div class="metric-card">
       <div class="metric-header">
-        <span>In-Memory Cache</span>
-        <span class="metric-tag" style="background:var(--purple-bg); color:var(--purple);">Size: 4096</span>
+        <span>Cache Hit Ratio</span>
+        <span class="metric-tag" style="background:var(--purple-bg); color:var(--purple);" id="stat-cache-size">Size: 4096</span>
       </div>
-      <div class="metric-value"><span id="stat-cache-items">24</span> <span style="font-size:13px; font-weight:400; color:var(--muted-foreground);">entries</span></div>
+      <div class="metric-value"><span id="stat-cache-pct">–</span></div>
       <div class="metric-footer" style="color:var(--purple);">
-        <span id="stat-cache-ratio">Local cache active</span>
+        <span><span id="stat-cache-hits">0</span> hits of <span id="stat-cache-total">0</span> • <span id="stat-cache-items">0</span> entries in RAM</span>
       </div>
     </div>
 
-    <!-- Card 4: Daemon Uptime -->
+    <!-- Card 4: Blocked / Allowed (totals since ctrld started) -->
     <div class="metric-card">
       <div class="metric-header">
-        <span>Daemon Uptime</span>
-        <span class="metric-tag" style="background:rgba(255,255,255,0.06); color:var(--muted-foreground);">systemd</span>
+        <span>Filtering</span>
+        <span class="metric-tag" style="background:var(--rose-bg); color:var(--rose);">NextDNS</span>
       </div>
-      <div class="metric-value" id="stat-uptime">0h 5m</div>
-      <div class="metric-footer" style="color:var(--emerald);">
-        <span>● 0 restarts (stable)</span>
+      <div class="metric-value"><span id="stat-block-pct">–</span> <span style="font-size:13px; font-weight:400; color:var(--muted-foreground);">blocked</span></div>
+      <div class="metric-footer" style="color:var(--muted-foreground);">
+        <span><span style="color:var(--rose);" id="stat-blocked">0</span> blocked • <span style="color:var(--emerald);" id="stat-allowed">0</span> allowed • <span id="stat-total">0</span> total</span>
       </div>
     </div>
   </div>
@@ -546,16 +588,16 @@
     </div>
 
     <!-- Feed Table -->
-    <div class="table-wrap">
+    <div class="table-wrap feed-wrap">
       <table>
         <thead>
           <tr>
-            <th style="width:75px;">Time</th>
-            <th style="width:170px;">Client Device</th>
-            <th style="width:60px;">Type</th>
-            <th>Domain</th>
-            <th style="width:230px;">Status / Upstream</th>
-            <th style="width:75px; text-align:right;">Latency</th>
+            <th data-col="time" style="width:80px;">Time</th>
+            <th data-col="client" style="width:260px;">Client Device</th>
+            <th data-col="type" style="width:65px;">Type</th>
+            <th data-col="domain">Domain</th>
+            <th data-col="status" style="width:220px;">Status / Upstream</th>
+            <th data-col="latency" style="width:80px; text-align:right;">Latency</th>
           </tr>
         </thead>
         <tbody id="feed-tbody">
@@ -659,6 +701,57 @@
   let cacheHits = 0;
   let sseAbortController = null;
   let originalToml = '';
+
+  // Escape untrusted text before it goes into innerHTML: domain names, DHCP
+  // hostnames and DNS answers come from the network and must never become markup.
+  function esc(v) {
+    return String(v === undefined || v === null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Resizable Live Feed columns. Widths are remembered in this browser only.
+  function initColumnResize() {
+    const KEY = 'ctrldFeedColWidths';
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { saved = {}; }
+    document.querySelectorAll('.feed-wrap th[data-col]').forEach(th => {
+      const col = th.dataset.col;
+      if (saved[col] && col !== 'domain') th.style.width = saved[col] + 'px';
+      if (col === 'domain') return; // takes the remaining width
+      const grip = document.createElement('div');
+      grip.className = 'col-resizer';
+      grip.title = 'Drag to resize (double-click to reset)';
+      th.appendChild(grip);
+      let startX = 0, startW = 0;
+      const onMove = ev => {
+        const w = Math.max(50, Math.min(600, startW + ev.clientX - startX));
+        th.style.width = w + 'px';
+      };
+      const onUp = () => {
+        grip.classList.remove('dragging');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        saved[col] = Math.round(th.getBoundingClientRect().width);
+        try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+      };
+      grip.addEventListener('mousedown', ev => {
+        ev.preventDefault();
+        startX = ev.clientX;
+        startW = th.getBoundingClientRect().width;
+        grip.classList.add('dragging');
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+      grip.addEventListener('dblclick', () => {
+        delete saved[col];
+        try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+        th.style.width = '';
+        location.reload();
+      });
+    });
+  }
+  document.addEventListener('DOMContentLoaded', initColumnResize);
 
   function showToast(msg) {
     const t = document.getElementById('toast');
@@ -806,20 +899,20 @@
     }
 
     const devName = ev.client_dev && ev.client_dev !== ev.client_ip ? ev.client_dev : (ev.client_ip || 'Router');
-    const devSub = ev.client_ip && ev.client_dev !== ev.client_ip ? `<div style="font-size:10px; color:var(--muted-foreground);">${ev.client_ip}</div>` : '';
+    const devIP = ev.client_ip && ev.client_dev !== ev.client_ip ? ev.client_ip : '';
+    const devTitle = devIP ? `${devName} (${devIP})` : devName;
+    const lat = Number(ev.latency_ms) || 0;
 
-    const latColor = ev.latency_ms <= 1 ? '#a855f7' : (ev.latency_ms < 10 ? '#34d399' : (ev.latency_ms < 50 ? '#60a5fa' : '#fbbf24'));
+    const latColor = lat <= 1 ? '#a855f7' : (lat < 10 ? '#34d399' : (lat < 50 ? '#60a5fa' : '#fbbf24'));
 
+    // Device name and IP on one line; the cell is cut with "…" and shows all on hover.
     tr.innerHTML = `
-      <td style="color:var(--muted-foreground);">${ev.time}</td>
-      <td>
-        <div style="font-weight:600; color:var(--foreground);">${devName}</div>
-        ${devSub}
-      </td>
-      <td style="color:#60a5fa;">${ev.type || 'A'}</td>
-      <td style="font-weight:600; color:var(--foreground); max-width:280px; overflow:hidden; text-overflow:ellipsis;" title="${ev.domain}">${ev.domain}</td>
-      <td><span class="status-badge ${badgeClass}">${statusText}</span></td>
-      <td style="text-align:right; font-weight:600; color:${latColor};">${ev.latency_ms} ms</td>
+      <td style="color:var(--muted-foreground);">${esc(ev.time)}</td>
+      <td class="cell-clip" title="${esc(devTitle)}"><span style="font-weight:600; color:var(--foreground);">${esc(devName)}</span>${devIP ? ` <span style="font-size:10px; color:var(--muted-foreground);">${esc(devIP)}</span>` : ''}</td>
+      <td style="color:#60a5fa;">${esc(ev.type || 'A')}</td>
+      <td class="cell-clip" style="font-weight:600; color:var(--foreground);" title="${esc(ev.domain)}">${esc(ev.domain)}</td>
+      <td class="cell-clip"><span class="status-badge ${badgeClass}">${esc(statusText)}</span></td>
+      <td style="text-align:right; font-weight:600; color:${latColor};">${lat} ms</td>
     `;
 
     if (prepend && tbody.firstChild) {
@@ -929,36 +1022,36 @@
 
       if (data.blocked) {
         banner = `<div style="color:var(--rose); font-weight:700; font-size:13px; margin-bottom:6px;">✖ STATUS: BLOCKED BY NEXTDNS</div>`;
-        detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
+        detailsHtml += `<div>Domain: <strong>${esc(data.name)}</strong> (${esc(data.type)})</div>`;
         if (data.block_reason) {
-          detailsHtml += `<div style="color:#fca5a5; margin-top:3px;">Block Reason: <strong>${data.block_reason}</strong></div>`;
+          detailsHtml += `<div style="color:#fca5a5; margin-top:3px;">Block Reason: <strong>${esc(data.block_reason)}</strong></div>`;
         }
         if (data.answers && data.answers.length > 0) {
-          detailsHtml += `<div style="color:var(--muted-foreground); margin-top:3px;">Returned Answer: ${data.answers.join(', ')}</div>`;
+          detailsHtml += `<div style="color:var(--muted-foreground); margin-top:3px;">Returned Answer: ${data.answers.map(esc).join(', ')}</div>`;
         } else {
           detailsHtml += `<div style="color:var(--muted-foreground); margin-top:3px;">Returned Answer: NODATA (0 records returned due to policy filtering)</div>`;
         }
       } else if (data.rcode === 'NOERROR' && data.answers && data.answers.length > 0) {
         banner = `<div style="color:var(--emerald); font-weight:700; font-size:13px; margin-bottom:6px;">✔ STATUS: NOERROR (ALLOWED & RESOLVED)</div>`;
-        detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
-        detailsHtml += `<div style="color:var(--foreground); margin-top:3px;">Answers:<br>&nbsp;&nbsp;${data.answers.join('<br>&nbsp;&nbsp;')}</div>`;
+        detailsHtml += `<div>Domain: <strong>${esc(data.name)}</strong> (${esc(data.type)})</div>`;
+        detailsHtml += `<div style="color:var(--foreground); margin-top:3px;">Answers:<br>&nbsp;&nbsp;${data.answers.map(esc).join('<br>&nbsp;&nbsp;')}</div>`;
       } else if (data.rcode === 'NXDOMAIN') {
         banner = `<div style="color:var(--amber); font-weight:700; font-size:13px; margin-bottom:6px;">ℹ STATUS: NXDOMAIN (DOMAIN DOES NOT EXIST)</div>`;
-        detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
+        detailsHtml += `<div>Domain: <strong>${esc(data.name)}</strong> (${esc(data.type)})</div>`;
         detailsHtml += `<div style="color:var(--muted-foreground); margin-top:3px;">The requested domain is not registered or does not exist on authoritative root DNS servers.</div>`;
       } else if (data.rcode === 'NOERROR' && (!data.answers || data.answers.length === 0)) {
-        banner = `<div style="color:#60a5fa; font-weight:700; font-size:13px; margin-bottom:6px;">ℹ STATUS: NOERROR / NODATA (NO ${data.type} RECORDS CONFIGURED)</div>`;
-        detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
-        detailsHtml += `<div style="color:var(--muted-foreground); margin-top:3px;">The domain exists, but has no records configured for type ${data.type}.</div>`;
+        banner = `<div style="color:#60a5fa; font-weight:700; font-size:13px; margin-bottom:6px;">ℹ STATUS: NOERROR / NODATA (NO ${esc(data.type)} RECORDS CONFIGURED)</div>`;
+        detailsHtml += `<div>Domain: <strong>${esc(data.name)}</strong> (${esc(data.type)})</div>`;
+        detailsHtml += `<div style="color:var(--muted-foreground); margin-top:3px;">The domain exists, but has no records configured for type ${esc(data.type)}.</div>`;
       } else {
-        banner = `<div style="color:var(--amber); font-weight:700; font-size:13px; margin-bottom:6px;">⚠ STATUS: ${data.rcode}</div>`;
-        detailsHtml += `<div>Domain: <strong>${data.name}</strong> (${data.type})</div>`;
+        banner = `<div style="color:var(--amber); font-weight:700; font-size:13px; margin-bottom:6px;">⚠ STATUS: ${esc(data.rcode)}</div>`;
+        detailsHtml += `<div>Domain: <strong>${esc(data.name)}</strong> (${esc(data.type)})</div>`;
       }
 
-      detailsHtml += `<div style="color:var(--muted-foreground); font-size:11px; margin-top:6px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">Server: 192.168.1.1:5354 (ctrld v3.19) • RTT: ${data.latency_ms} ms • RCODE: ${data.rcode}</div>`;
+      detailsHtml += `<div style="color:var(--muted-foreground); font-size:11px; margin-top:6px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">Server: 192.168.1.1:5354 • RTT: ${esc(data.latency_ms)} ms • RCODE: ${esc(data.rcode)}</div>`;
       box.innerHTML = banner + detailsHtml;
     } catch(e) {
-      box.innerHTML = `<div style="color:var(--rose); font-weight:700;">Query error: ${e.message}</div>`;
+      box.innerHTML = `<div style="color:var(--rose); font-weight:700;">Query error: ${esc(e.message)}</div>`;
     }
   }
 
@@ -1066,7 +1159,7 @@
         const card = document.createElement('div');
         card.className = `upstream-card ${isPrimary ? 'active-primary' : ''}`;
         
-        let statusBadge = `<span style="font-size:11px; color:var(--muted-foreground);">• ${u.status}</span>`;
+        let statusBadge = `<span style="font-size:11px; color:var(--muted-foreground);">• ${esc(u.status)}</span>`;
         if (isPrimary) {
           statusBadge = `<span style="font-size:11px; font-weight:700; color:var(--emerald);">• In Use</span>`;
         } else if (u.status === 'Last Resort') {
@@ -1074,18 +1167,18 @@
         }
 
         const epDisplay = u.endpoint + (u.bootstrap_ip ? ` • IP: ${u.bootstrap_ip}` : '');
-        const rightText = isPrimary ? `<span style="font-weight:700; color:var(--emerald);">${u.latency} ms</span><div style="font-size:10px; color:var(--muted-foreground);">0 errors</div>` : `<span style="font-size:11px; color:var(--muted-foreground);">${u.timeout} ms t/o</span>`;
+        const rightText = isPrimary ? `<span style="font-weight:700; color:var(--emerald);">${esc(u.latency)} ms</span>` : `<span style="font-size:11px; color:var(--muted-foreground);">${esc(u.timeout)} ms t/o</span>`;
 
         card.innerHTML = `
           <div style="display:flex; align-items:center; gap:12px;">
-            <div class="upstream-num">${u.index}</div>
+            <div class="upstream-num">${esc(u.index)}</div>
             <div>
               <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-weight:700; font-size:13px;">${u.name}</span>
-                <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.08); font-family:ui-monospace, monospace;">${u.type}</span>
+                <span style="font-weight:700; font-size:13px;">${esc(u.name)}</span>
+                <span style="font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.08); font-family:ui-monospace, monospace;">${esc(u.type)}</span>
                 ${statusBadge}
               </div>
-              <div style="font-size:11px; color:var(--muted-foreground); font-family:ui-monospace, monospace; margin-top:2px;">${epDisplay}</div>
+              <div style="font-size:11px; color:var(--muted-foreground); font-family:ui-monospace, monospace; margin-top:2px;">${esc(epDisplay)}</div>
             </div>
           </div>
           <div style="text-align:right;">${rightText}</div>
@@ -1137,6 +1230,18 @@
       if (data.uptime_str) document.getElementById('stat-uptime').innerText = data.uptime_str;
       if (data.mem_rss_mb) document.getElementById('stat-ram-mb').innerText = data.mem_rss_mb.toFixed(1);
       if (data.cache_items !== undefined) document.getElementById('stat-cache-items').innerText = data.cache_items;
+      if (data.cache_size) document.getElementById('stat-cache-size').innerText = 'Size: ' + data.cache_size;
+      if (data.queries) {
+        const q = data.queries, fmt = n => n.toLocaleString();
+        const pct = (part) => q.total > 0 ? (100 * part / q.total).toFixed(1) + '%' : '–';
+        document.getElementById('stat-cache-pct').innerText = pct(q.cached);
+        document.getElementById('stat-cache-hits').innerText = fmt(q.cached);
+        document.getElementById('stat-cache-total').innerText = fmt(q.total);
+        document.getElementById('stat-block-pct').innerText = pct(q.blocked);
+        document.getElementById('stat-blocked').innerText = fmt(q.blocked);
+        document.getElementById('stat-allowed').innerText = fmt(q.allowed);
+        document.getElementById('stat-total').innerText = fmt(q.total);
+      }
       if (data.active_upstream) {
         document.getElementById('stat-upstream').innerText = data.active_upstream.name || 'NextDNS';
         document.getElementById('stat-proto').innerText = data.active_upstream.type || 'DoH3';

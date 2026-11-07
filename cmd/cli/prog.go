@@ -119,21 +119,26 @@ type prog struct {
 	dnsWatcherStopCh     chan struct{}
 	rc                   *controld.ResolverConfig
 
-	cfg                       *ctrld.Config
-	localUpstreams            []string
-	ptrNameservers            []string
-	appCallback               *AppCallback
-	cache                     dnscache.Cacher
-	cacheFlushDomainsMap      map[string]struct{}
-	sema                      semaphore
-	ciTable                   *clientinfo.Table
-	um                        *upstreamMonitor
-	router                    router.Router
-	ptrLoopGuard              *loopGuard
-	lanLoopGuard              *loopGuard
-	metricsQueryStats         atomic.Bool
+	cfg                  *ctrld.Config
+	localUpstreams       []string
+	ptrNameservers       []string
+	appCallback          *AppCallback
+	cache                dnscache.Cacher
+	cacheFlushDomainsMap map[string]struct{}
+	sema                 semaphore
+	ciTable              *clientinfo.Table
+	um                   *upstreamMonitor
+	router               router.Router
+	ptrLoopGuard         *loopGuard
+	lanLoopGuard         *loopGuard
+	metricsQueryStats    atomic.Bool
+	// webRingBuf holds recent DNS events for the Web UI. It is created once in
+	// run() and survives reloads; events are recorded only while webActive.
 	webRingBuf                *WebRingBuffer
-	webServer                 *webServer
+	webActive                 atomic.Bool
+	webSessionsMu             sync.Mutex
+	webSessions               *sessionManager
+	webSessionsHash           string
 	queryFromSelfMap          sync.Map
 	initInternalLogWriterOnce sync.Once
 	internalLogWriter         *logWriter

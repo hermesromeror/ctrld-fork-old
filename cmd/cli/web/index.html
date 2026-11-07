@@ -436,6 +436,9 @@
       </div>
     </div>
     <div class="header-actions">
+      <button id="btn-auth-toggle" onclick="toggleAuthModal()" style="background:rgba(245, 158, 11, 0.15); border:1px solid rgba(245, 158, 11, 0.4); color:#fbbf24; font-size:11px; padding:6px 11px;">
+        <span id="auth-status-icon">🔒</span> <span id="auth-status-text">Read-Only</span>
+      </button>
       <button onclick="flushCache()" id="btn-flush">
         <span>🧹</span> Flush Cache
       </button>
@@ -594,6 +597,15 @@
 
   <!-- TAB 4: Configuration TOML -->
   <div id="view-config" class="tab-view">
+    <!-- Lock / Security banner -->
+    <div id="editor-lock-banner" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <div style="color:#fbbf24; display:flex; align-items:center; gap:8px;">
+        <span style="font-size:16px;">🔒</span>
+        <span id="editor-lock-banner-text"><strong>Configuration Editor is locked in Read-Only mode.</strong> Admin Auth Token is required to edit and save changes.</span>
+      </div>
+      <button onclick="openAuthModal()" id="btn-editor-unlock" style="background:var(--amber); color:#000; border:none; padding:5px 12px; font-weight:700; border-radius:6px; cursor:pointer;">Unlock Editor</button>
+    </div>
+
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
       <div>
         <div style="font-weight:700; font-size:14px;" id="config-path-title">Active Configuration File (/data/controld/ctrld.toml)</div>
@@ -603,20 +615,20 @@
         </div>
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
-        <button onclick="discardConfigChanges()" id="btn-discard-config" style="padding:6px 12px; font-size:12px;">
+        <button onclick="discardConfigChanges()" id="btn-discard-config" style="padding:6px 12px; font-size:12px;" disabled>
           <span>↺</span> Discard
         </button>
-        <button onclick="saveConfig()" id="btn-save-config" class="primary" style="padding:6px 14px; font-size:12px; background:var(--emerald); border-color:var(--emerald);">
-          <span>💾</span> Save & Apply
+        <button onclick="saveConfig()" id="btn-save-config" class="primary" style="padding:6px 14px; font-size:12px; background:var(--emerald); border-color:var(--emerald); opacity:0.6; cursor:not-allowed;" disabled>
+          <span>🔒</span> Save & Apply (Locked)
         </button>
       </div>
     </div>
 
     <!-- Error banner -->
-    <div id="config-error-banner" style="display:none; padding:10px 14px; border-radius:8px; background:var(--rose-bg); border:1px solid rgba(244,63,94,0.3); color:#fca5a5; font-family:ui-monospace, monospace; font-size:12px; white-space:pre-wrap;"></div>
+    <div id="config-error-banner" style="display:none; padding:10px 14px; border-radius:8px; background:var(--rose-bg); border:1px solid rgba(244,63,94,0.3); color:#fca5a5; font-family:ui-monospace, monospace; font-size:12px; white-space:pre-wrap; margin-top:12px;"></div>
 
     <!-- TOML Editor Textarea -->
-    <textarea id="toml-editor" spellcheck="false" class="toml-editor" placeholder="Loading configuration..."></textarea>
+    <textarea id="toml-editor" spellcheck="false" class="toml-editor" placeholder="Loading configuration..." readonly style="opacity:0.8; margin-top:12px;"></textarea>
 
     <div style="font-size:11px; color:var(--muted-foreground); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
       <span>💡 When saving, <code>ctrld</code> automatically validates TOML syntax, creates a timestamped backup (<code>.bak.timestamp</code>) in <code>/data/controld/</code>, and hot-reloads configuration without network interruption.</span>
@@ -626,9 +638,248 @@
 
 </div>
 
+<!-- Admin Auth Modal -->
+<div id="auth-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
+  <div style="background:var(--card); border:1px solid var(--card-border); border-radius:14px; width:90%; max-width:420px; padding:22px; box-shadow:0 25px 50px rgba(0,0,0,0.8);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h3 style="font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px;">
+        <span>🔐</span> Admin Authentication
+      </h3>
+      <button onclick="closeAuthModal()" style="background:transparent; border:none; color:var(--muted-foreground); font-size:16px; cursor:pointer; padding:4px;">✕</button>
+    </div>
+    <p style="font-size:12px; color:var(--muted-foreground); margin-bottom:16px; line-height:1.5;">
+      Enter the <strong>auth_token</strong> configured in <code>ctrld.toml</code> to unlock configuration editing, save changes, and manage the ctrld daemon.
+    </p>
+    <div style="margin-bottom:16px;">
+      <input type="password" id="modal-token-input" placeholder="Paste or type auth_token..." style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--card-border); background:#070a11; color:#fff; font-family:ui-monospace, monospace; font-size:13px; outline:none;" onkeydown="if(event.key==='Enter') submitAuthToken()">
+      <div id="modal-auth-error" style="display:none; color:var(--rose); font-size:11px; margin-top:8px; font-weight:600;"></div>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button onclick="closeAuthModal()" style="background:#1f2937; color:var(--foreground); padding:8px 14px;">Cancel</button>
+      <button onclick="submitAuthToken()" class="primary" id="btn-modal-unlock" style="padding:8px 16px;">Unlock Admin</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast">Notification</div>
 
 <script>
+  let isAdmin = false;
+  let authToken = localStorage.getItem('ctrld_auth_token') || '';
+
+  // Check URL query param ?token=...
+  const urlParamToken = new URLSearchParams(window.location.search).get('token');
+  if (urlParamToken) {
+    authToken = urlParamToken;
+    localStorage.setItem('ctrld_auth_token', authToken);
+  }
+
+  function getAuthHeaders(includeJson = true) {
+    const h = {};
+    if (includeJson) h['Content-Type'] = 'application/json';
+    if (authToken) {
+      h['X-Auth-Token'] = authToken;
+    }
+    return h;
+  }
+
+  function setAdminState(unlocked) {
+    isAdmin = unlocked;
+    const btnToggle = document.getElementById('btn-auth-toggle');
+    const icon = document.getElementById('auth-status-icon');
+    const text = document.getElementById('auth-status-text');
+    const editor = document.getElementById('toml-editor');
+    const btnSave = document.getElementById('btn-save-config');
+    const btnDiscard = document.getElementById('btn-discard-config');
+    const lockBanner = document.getElementById('editor-lock-banner');
+    const lockText = document.getElementById('editor-lock-banner-text');
+    const btnUnlock = document.getElementById('btn-editor-unlock');
+
+    if (unlocked) {
+      if (btnToggle) {
+        btnToggle.style.background = 'rgba(16, 185, 129, 0.15)';
+        btnToggle.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+        btnToggle.style.color = '#34d399';
+      }
+      if (icon) icon.innerText = '🔓';
+      if (text) text.innerText = 'Admin Unlocked (Lock)';
+
+      if (lockBanner) {
+        lockBanner.style.background = 'rgba(16, 185, 129, 0.12)';
+        lockBanner.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+      }
+      if (lockText) {
+        lockText.innerHTML = '<strong>Admin Mode Unlocked.</strong> Configuration can now be edited and saved.';
+        lockText.parentElement.style.color = '#34d399';
+      }
+      if (btnUnlock) {
+        btnUnlock.innerText = 'Lock';
+        btnUnlock.style.background = '#1f2937';
+        btnUnlock.style.color = 'var(--muted-foreground)';
+        btnUnlock.onclick = lockAdmin;
+      }
+
+      if (editor) {
+        editor.removeAttribute('readonly');
+        editor.style.opacity = '1';
+      }
+      if (btnSave) {
+        btnSave.disabled = false;
+        btnSave.style.opacity = '1';
+        btnSave.style.cursor = 'pointer';
+        btnSave.innerHTML = '<span>💾</span> Save & Apply';
+      }
+      if (btnDiscard) {
+        btnDiscard.disabled = false;
+      }
+    } else {
+      if (btnToggle) {
+        btnToggle.style.background = 'rgba(245, 158, 11, 0.15)';
+        btnToggle.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+        btnToggle.style.color = '#fbbf24';
+      }
+      if (icon) icon.innerText = '🔒';
+      if (text) text.innerText = 'Read-Only (Unlock)';
+
+      if (lockBanner) {
+        lockBanner.style.background = 'rgba(245, 158, 11, 0.12)';
+        lockBanner.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+      }
+      if (lockText) {
+        lockText.innerHTML = '<strong>Configuration Editor is locked in Read-Only mode.</strong> Admin Auth Token is required to edit and save changes.';
+        lockText.parentElement.style.color = '#fbbf24';
+      }
+      if (btnUnlock) {
+        btnUnlock.innerText = 'Unlock Editor';
+        btnUnlock.style.background = 'var(--amber)';
+        btnUnlock.style.color = '#000';
+        btnUnlock.onclick = openAuthModal;
+      }
+
+      if (editor) {
+        editor.setAttribute('readonly', 'true');
+        editor.style.opacity = '0.75';
+      }
+      if (btnSave) {
+        btnSave.disabled = true;
+        btnSave.style.opacity = '0.5';
+        btnSave.style.cursor = 'not-allowed';
+        btnSave.innerHTML = '<span>🔒</span> Save & Apply (Locked)';
+      }
+      if (btnDiscard) {
+        btnDiscard.disabled = true;
+      }
+    }
+  }
+
+  function openAuthModal() {
+    const modal = document.getElementById('auth-modal');
+    const input = document.getElementById('modal-token-input');
+    const err = document.getElementById('modal-auth-error');
+    if (err) err.style.display = 'none';
+    if (input) {
+      input.value = authToken || '';
+    }
+    if (modal) {
+      modal.style.display = 'flex';
+      setTimeout(() => input && input.focus(), 50);
+    }
+  }
+
+  function closeAuthModal() {
+    const modal = document.getElementById('auth-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  function toggleAuthModal() {
+    if (isAdmin) {
+      lockAdmin();
+    } else {
+      openAuthModal();
+    }
+  }
+
+  function lockAdmin() {
+    authToken = '';
+    localStorage.removeItem('ctrld_auth_token');
+    setAdminState(false);
+    showToast('Switched to Read-Only mode');
+  }
+
+  async function submitAuthToken() {
+    const input = document.getElementById('modal-token-input');
+    const err = document.getElementById('modal-auth-error');
+    const token = input ? input.value.trim() : '';
+    if (!token) {
+      if (err) {
+        err.innerText = 'Please enter the auth token';
+        err.style.display = 'block';
+      }
+      return;
+    }
+
+    const btn = document.getElementById('btn-modal-unlock');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = 'Verifying...';
+    }
+
+    try {
+      const res = await fetch('/api/verify-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token })
+      });
+      const data = await res.json();
+      if (res.ok && data.valid) {
+        authToken = token;
+        localStorage.setItem('ctrld_auth_token', token);
+        setAdminState(true);
+        closeAuthModal();
+        showToast('Admin mode unlocked successfully');
+      } else {
+        if (err) {
+          err.innerText = data.message || 'Invalid authentication token';
+          err.style.display = 'block';
+        }
+      }
+    } catch(e) {
+      if (err) {
+        err.innerText = 'Verification error: ' + e.message;
+        err.style.display = 'block';
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerText = 'Unlock Admin';
+      }
+    }
+  }
+
+  async function checkInitialAuth() {
+    if (!authToken) {
+      setAdminState(false);
+      return;
+    }
+    try {
+      const res = await fetch('/api/verify-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+        body: JSON.stringify({ token: authToken })
+      });
+      const data = await res.json();
+      if (res.ok && data.valid) {
+        setAdminState(true);
+      } else {
+        authToken = '';
+        localStorage.removeItem('ctrld_auth_token');
+        setAdminState(false);
+      }
+    } catch(e) {
+      setAdminState(false);
+    }
+  }
+
   let isPaused = false;
   let allEvents = [];
   let currentStatusFilter = 'all';
@@ -775,10 +1026,21 @@
   }
 
   async function flushCache() {
+    if (!isAdmin) {
+      showToast('Admin token required to flush cache');
+      openAuthModal();
+      return;
+    }
     const btn = document.getElementById('btn-flush');
     btn.innerHTML = '<span>⏳</span> Flushing...';
     try {
-      const res = await fetch('/api/flush-cache', { method: 'POST' });
+      const res = await fetch('/api/flush-cache', { method: 'POST', headers: getAuthHeaders(false) });
+      if (res.status === 401) {
+        setAdminState(false);
+        showToast('Unauthorized: invalid admin token');
+        openAuthModal();
+        return;
+      }
       const data = await res.json();
       btn.innerHTML = '<span>✔</span> Flushed!';
       showToast(data.message || 'DNS cache purged');
@@ -791,10 +1053,21 @@
   }
 
   async function restartService() {
+    if (!isAdmin) {
+      showToast('Admin token required to restart service');
+      openAuthModal();
+      return;
+    }
     const btn = document.getElementById('btn-restart');
     btn.innerHTML = '<span>⏳</span> Restarting...';
     try {
-      await fetch('/api/restart', { method: 'POST' });
+      const res = await fetch('/api/restart', { method: 'POST', headers: getAuthHeaders(false) });
+      if (res.status === 401) {
+        setAdminState(false);
+        showToast('Unauthorized: invalid admin token');
+        openAuthModal();
+        return;
+      }
       showToast('ctrld service restarted');
       setTimeout(() => {
         btn.innerHTML = '<span>✔</span> Active!';
@@ -900,6 +1173,11 @@
   }
 
   async function saveConfig() {
+    if (!isAdmin) {
+      showToast('Admin token required to save configuration');
+      openAuthModal();
+      return;
+    }
     const editor = document.getElementById('toml-editor');
     const btn = document.getElementById('btn-save-config');
     const errBanner = document.getElementById('config-error-banner');
@@ -911,9 +1189,15 @@
     try {
       const res = await fetch('/api/config-save', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify({ content: editor.value })
       });
+      if (res.status === 401) {
+        setAdminState(false);
+        showToast('Unauthorized: invalid admin token');
+        openAuthModal();
+        return;
+      }
       const data = await res.json();
       if (!res.ok || data.status === 'error') {
         errBanner.innerText = data.message || 'Error saving configuration';
@@ -933,8 +1217,10 @@
       errBanner.style.display = 'block';
       showToast('Error connecting to server');
     } finally {
-      btn.disabled = false;
-      btn.innerHTML = '<span>💾</span> Save & Apply';
+      if (isAdmin) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>💾</span> Save & Apply';
+      }
     }
   }
 
@@ -1053,6 +1339,7 @@
   }
 
   // Init
+  checkInitialAuth();
   refreshStatus();
   loadDevices();
   setInterval(refreshStatus, 4000);

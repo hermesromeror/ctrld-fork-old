@@ -1,10 +1,10 @@
 # Guía de administración: ctrld + NextDNS en Firewalla Gold
 
-Actualizada: 2026-11-07 (v3.19.9). Copia en el router: `/data/controld/GUIA_ADMINISTRACION.md`.
+Actualizada: 2026-11-07 (v3.20). Copia en el router: `/data/controld/GUIA_ADMINISTRACION.md`.
 
 ## 1. Estado
 
-- **Versión:** `v1.5.9+patched-v3.19.9-webui` (ctrld oficial v1.5.9 + parches propios + panel web).
+- **Versión:** `v1.5.9+patched-v3.20-webui` (ctrld oficial v1.5.9 + parches propios + panel web).
 - **Upstreams:** NextDNS `d23c32` por DoH3 → Cloudflare Families (DoH) → Quad9 (DoH) → AT&T (UDP 53, último recurso). Control D ya no se usa.
 - **Panel web:** `https://192.168.20.1:5380` (HTTPS y contraseña obligatorios).
 - **Panel NextDNS:** https://my.nextdns.io/d23c32 ("Cache Boost" desactivado).
@@ -15,10 +15,10 @@ Actualizada: 2026-11-07 (v3.19.9). Copia en el router: `/data/controld/GUIA_ADMI
 | :--- | :--- |
 | Configuración | `/data/controld/ctrld.toml` (root 0600) |
 | Binario | `/data/controld/ctrld` |
-| Respaldos del binario | `ctrld.bak-patched-v3.19.8-webui` (versión anterior), `ctrld.bak-patched-v3.17-minmem` (sin panel), `ctrld.orig-1.5.7` (original de Control D, histórico) |
+| Respaldos del binario | `ctrld.bak-patched-v3.19.9-webui` (versión anterior inmediata), `ctrld.bak-patched-v3.19.8-webui`, `ctrld.bak-patched-v3.17-minmem` (sin panel), `ctrld.orig-1.5.7` (original de Control D, histórico) |
 | Respaldos del TOML | `ctrld.toml.bak.20261107_130012` (antes de la contraseña), `…20261107_105801` (antes del panel), `…20261106_093636` (antes de anexia) |
-| Diffs de los parches | `patches-v3.*.diff` (historial v3.1–v3.17), `patches-v3.17-to-v3.19.1.diff` (Antigravity), `patches-v3.19.1-to-v3.19.9.diff` (acumulado actual) |
-| Fuente en el PC | `C:\Users\Pipo\firewalla-ops\ctrld-build\v3.19.9` (= v3.17 + los dos diffs anteriores) |
+| Diffs de los parches | `patches-v3.*.diff` (historial v3.1–v3.17), `patches-v3.17-to-v3.19.1.diff`, `patches-v3.19.1-to-v3.19.9.diff`, `patches-v3.19.9-to-v3.20.diff` |
+| Fuente en el PC | `C:\Users\Pipo\firewalla-ops\ctrld-build\v3.19.9` (o rama git `firewalla-v3.20-webui`) |
 | Certificado del panel | `/data/controld/web/cert.pem` (0644), `key.pem` (0600) |
 | Unidad systemd permanente | `/data/controld/ctrld.service` (`RestartSec=10`) |
 | Script de arranque | `/home/pi/.firewalla/config/post_main.d/start_ctrld.sh` |
@@ -51,7 +51,12 @@ Cambiar la contraseña del panel (desde el PC; la pide dos veces sin mostrarla):
 ssh -t firewalla "sudo /data/controld/ctrld web-passwd --config /data/controld/ctrld.toml && sudo systemctl restart ctrld"
 ```
 
-Revertir a la versión anterior (v3.19.8, mismo panel):
+Revertir a la versión anterior (v3.19.9):
+
+```bash
+sudo cp -p /data/controld/ctrld.bak-patched-v3.19.9-webui /data/controld/ctrld
+sudo systemctl restart ctrld
+```
 
 ```bash
 sudo cp -p /data/controld/ctrld.bak-patched-v3.19.8-webui /data/controld/ctrld

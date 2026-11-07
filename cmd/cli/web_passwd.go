@@ -2,13 +2,11 @@ package cli
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
@@ -101,41 +99,89 @@ func setWebPasswordInConfigFile(cfgPath, passStr string) error {
 		return fmt.Errorf("reading config file %s: %w", cfgPath, err)
 	}
 
-	// Parse into map to preserve structure and update web.password_hash
-	var cfgMap map[string]any
-	if err := toml.Unmarshal(data, &cfgMap); err != nil {
-		return fmt.Errorf("parsing TOML config %s: %w", cfgPath, err)
-	}
-
-	webSection, ok := cfgMap["web"].(map[string]any)
-	if !ok {
-		webSection = make(map[string]any)
-		webSection["enable"] = true
-		webSection["listen_ip"] = "192.168.20.1"
-		webSection["port"] = int64(5380)
-		cfgMap["web"] = webSection
-	}
-	// Delete obsolete auth_token if present
-	delete(webSection, "auth_token")
-	webSection["password_hash"] = string(hash)
-
-	// Marshal back to TOML
-	outBuf := new(bytes.Buffer)
-	if err := toml.NewEncoder(outBuf).Encode(cfgMap); err != nil {
-		return fmt.Errorf("serializing TOML config: %w", err)
-	}
-
-	// Create timestamped backup
+	// Create timestamped backup BEFORE modifying
 	bakPath := fmt.Sprintf("%s.bak.%s", cfgPath, time.Now().Format("20060102_150405"))
-	_ = os.WriteFile(bakPath, data, 0600)
+	if err := os.WriteFile(bakPath, data, 0600); err != nil {
+		return fmt.Errorf("creating backup file %s: %w", bakPath, err)
+	}
+
+	// Perform surgical textual replacement on [web] section to preserve formatting,
+	// comments, indentation, and structure of the rest of the configuration.
+	updatedContent := updateTomlPasswordHash(string(data), string(hash))
 
 	// Write atomically (.tmp -> rename)
 	tmpFile := cfgPath + ".tmp"
-	if err := os.WriteFile(tmpFile, outBuf.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(updatedContent), 0600); err != nil {
 		return fmt.Errorf("writing temporary config: %w", err)
 	}
 	if err := os.Rename(tmpFile, cfgPath); err != nil {
 		return fmt.Errorf("applying config file: %w", err)
 	}
 	return nil
+}
+
+func updateTomlPasswordHash(content, hash string) string {
+	lines := strings.Split(content, "\n")
+	var newLines []string
+	inWeb := false
+	webFound := false
+	hashSet := false
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		// Check section header
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			if inWeb && !hashSet {
+				// Reached end of [web] without finding password_hash, insert it before next section
+				newLines = append(newLines, fmt.Sprintf("  password_hash = '%s'", hash))
+				hashSet = true
+			}
+			if trimmed == "[web]" {
+				inWeb = true
+				webFound = true
+				newLines = append(newLines, line)
+				continue
+			} else {
+				inWeb = false
+			}
+		}
+
+		if inWeb {
+			// Remove obsolete auth_token
+			if strings.HasPrefix(trimmed, "auth_token") {
+				continue
+			}
+			// Replace existing password_hash
+			if strings.HasPrefix(trimmed, "password_hash") {
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				newLines = append(newLines, fmt.Sprintf("%spassword_hash = '%s'", indent, hash))
+				hashSet = true
+				continue
+			}
+		}
+
+		newLines = append(newLines, line)
+	}
+
+	if inWeb && !hashSet {
+		// File ended while in [web]
+		newLines = append(newLines, fmt.Sprintf("  password_hash = '%s'", hash))
+		hashSet = true
+	}
+
+	if !webFound {
+		// Append [web] section if it did not exist
+		if len(newLines) > 0 && newLines[len(newLines)-1] != "" {
+			newLines = append(newLines, "")
+		}
+		newLines = append(newLines, "[web]")
+		newLines = append(newLines, "  enable = true")
+		newLines = append(newLines, "  listen_ip = '192.168.20.1'")
+		newLines = append(newLines, "  port = 5380")
+		newLines = append(newLines, fmt.Sprintf("  password_hash = '%s'", hash))
+	}
+
+	return strings.Join(newLines, "\n")
 }

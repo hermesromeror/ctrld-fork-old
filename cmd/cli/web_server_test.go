@@ -240,6 +240,23 @@ func TestWebAuthToken(t *testing.T) {
 		t.Errorf("expected 200 OK for /api/restart with valid token, got %d", rec.Code)
 	}
 
+	// Protected sensitive endpoint (/api/config-raw) without token -> 401
+	req = httptest.NewRequest(http.MethodGet, "/api/config-raw", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for /api/config-raw without token, got %d", rec.Code)
+	}
+
+	// Protected sensitive endpoint (/api/config-raw) with valid token -> 200
+	req = httptest.NewRequest(http.MethodGet, "/api/config-raw", nil)
+	req.Header.Set("X-Auth-Token", "secret123")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /api/config-raw with valid token, got %d", rec.Code)
+	}
+
 	// Verify token endpoint
 	req = httptest.NewRequest(http.MethodPost, "/api/verify-token", strings.NewReader(`{"token":"wrong"}`))
 	rec = httptest.NewRecorder()

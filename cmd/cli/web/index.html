@@ -732,6 +732,7 @@
       if (btnDiscard) {
         btnDiscard.disabled = false;
       }
+      loadConfigRaw();
     } else {
       if (btnToggle) {
         btnToggle.style.background = 'rgba(245, 158, 11, 0.15)';
@@ -769,6 +770,7 @@
       if (btnDiscard) {
         btnDiscard.disabled = true;
       }
+      loadConfigRaw();
     }
   }
 
@@ -1137,10 +1139,29 @@
 
   async function loadConfigRaw() {
     const editor = document.getElementById('toml-editor');
+    if (!editor) return;
     const errBanner = document.getElementById('config-error-banner');
-    errBanner.style.display = 'none';
+    if (errBanner) errBanner.style.display = 'none';
+
+    if (!isAdmin) {
+      originalToml = `# 🔒 CONFIGURATION PROTECTED (READ ACCESS RESTRICTED)
+# File: /data/controld/ctrld.toml (0600 root:root)
+#
+# Viewing and editing this file is restricted because it contains sensitive
+# upstream endpoints, network policies, and security tokens.
+#
+# Click "Unlock Editor" above or enter your Admin Auth Token to view and edit this configuration.`;
+      editor.value = originalToml;
+      updateConfigStatusBadge();
+      return;
+    }
+
     try {
-      const res = await fetch('/api/config-raw');
+      const res = await fetch('/api/config-raw', { headers: getAuthHeaders(false) });
+      if (res.status === 401) {
+        setAdminState(false);
+        return;
+      }
       const data = await res.json();
       if (data.path) document.getElementById('config-path-title').innerText = `Active Configuration File (${data.path})`;
       originalToml = data.content || '';

@@ -190,6 +190,8 @@ func TestWebAuthToken(t *testing.T) {
 		cfg: &ctrld.Config{
 			Web: &ctrld.WebConfig{
 				Enable:    true,
+				ListenIP:  "192.168.20.1",
+				Port:      5380,
 				AuthToken: "secret123",
 			},
 		},
@@ -197,8 +199,10 @@ func TestWebAuthToken(t *testing.T) {
 	ws, _ := p.newWebServer()
 	handler := ws.authMiddleware(ws.mux)
 
+	baseURL := "http://192.168.20.1:5380"
+
 	// Read-only endpoint is accessible without token, but reports is_admin=false
-	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req := httptest.NewRequest(http.MethodGet, baseURL+"/api/status", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -211,7 +215,7 @@ func TestWebAuthToken(t *testing.T) {
 	}
 
 	// Read-only endpoint with token reports is_admin=true
-	req = httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/status", nil)
 	req.Header.Set("X-Auth-Token", "secret123")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -224,7 +228,7 @@ func TestWebAuthToken(t *testing.T) {
 	}
 
 	// Protected admin endpoint (/api/restart) without token -> 401
-	req = httptest.NewRequest(http.MethodPost, "/api/restart", nil)
+	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/restart", nil)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -232,7 +236,7 @@ func TestWebAuthToken(t *testing.T) {
 	}
 
 	// Protected admin endpoint (/api/restart) with valid token -> 200
-	req = httptest.NewRequest(http.MethodPost, "/api/restart", nil)
+	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/restart", nil)
 	req.Header.Set("X-Auth-Token", "secret123")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -241,7 +245,7 @@ func TestWebAuthToken(t *testing.T) {
 	}
 
 	// Protected sensitive endpoint (/api/config-raw) without token -> 401
-	req = httptest.NewRequest(http.MethodGet, "/api/config-raw", nil)
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/config-raw", nil)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -249,7 +253,7 @@ func TestWebAuthToken(t *testing.T) {
 	}
 
 	// Protected sensitive endpoint (/api/config-raw) with valid token -> 200
-	req = httptest.NewRequest(http.MethodGet, "/api/config-raw", nil)
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/config-raw", nil)
 	req.Header.Set("X-Auth-Token", "secret123")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -257,15 +261,58 @@ func TestWebAuthToken(t *testing.T) {
 		t.Errorf("expected 200 OK for /api/config-raw with valid token, got %d", rec.Code)
 	}
 
+	// Protected telemetry endpoint (/api/queries) without token -> 401
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/queries", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for /api/queries without token, got %d", rec.Code)
+	}
+
+	// Protected telemetry endpoint (/api/queries) with valid token -> 200
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/queries", nil)
+	req.Header.Set("X-Auth-Token", "secret123")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /api/queries with valid token, got %d", rec.Code)
+	}
+
+	// Host header validation: rogue host -> 403
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/status", nil)
+	req.Host = "evil-domain.com"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for rogue Host header, got %d", rec.Code)
+	}
+
+	// Cross-origin check: rogue origin -> 403
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/status", nil)
+	req.Header.Set("Origin", "http://malicious-site.com")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for malicious Origin, got %d", rec.Code)
+	}
+
+	// Verify security headers
+	if rec.Header().Get("X-Frame-Options") != "DENY" {
+		t.Errorf("missing or invalid X-Frame-Options header")
+	}
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("missing or invalid X-Content-Type-Options header")
+	}
+
 	// Verify token endpoint
-	req = httptest.NewRequest(http.MethodPost, "/api/verify-token", strings.NewReader(`{"token":"wrong"}`))
+	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/verify-token", strings.NewReader(`{"token":"wrong"}`))
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 for wrong token, got %d", rec.Code)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/verify-token", strings.NewReader(`{"token":"secret123"}`))
+	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/verify-token", strings.NewReader(`{"token":"secret123"}`))
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

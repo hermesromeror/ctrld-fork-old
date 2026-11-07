@@ -84,38 +84,60 @@ func (ws *webServer) isAuthorized(r *http.Request) bool {
 			reqToken = strings.TrimPrefix(authHdr, "Bearer ")
 		}
 	}
-	if reqToken == "" {
-		reqToken = r.URL.Query().Get("token")
-	}
 	return reqToken != "" && reqToken == ws.token
 }
 
 func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers for local LAN admin tools
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Auth-Token")
+		// Basic security headers
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:;")
+
+		// Host header validation (blocks DNS rebinding and rogue host headers)
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		expectedHost, _, _ := net.SplitHostPort(ws.addr)
+		if host != expectedHost && host != "127.0.0.1" && host != "localhost" && host != "192.168.20.1" {
+			http.Error(w, `{"error":"invalid host header"}`, http.StatusForbidden)
+			return
+		}
+
+		// Cross-origin check: reject external cross-origin requests
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			if !strings.Contains(origin, expectedHost) && !strings.Contains(origin, "127.0.0.1") && !strings.Contains(origin, "localhost") && !strings.Contains(origin, "192.168.20.1") {
+				http.Error(w, `{"error":"cross-origin forbidden"}`, http.StatusForbidden)
+				return
+			}
+		}
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 
-		// Mutating / administrative / sensitive endpoints strictly require token if ws.token is configured
-		adminEndpoints := []string{"/api/config-save", "/api/restart", "/api/flush-cache", "/api/config-raw"}
-		for _, ep := range adminEndpoints {
-			if r.URL.Path == ep {
-				if !ws.isAuthorized(r) {
-					w.Header().Set("Content-Type", "application/json; charset=utf-8")
-					w.WriteHeader(http.StatusUnauthorized)
-					_ = json.NewEncoder(w).Encode(map[string]any{
-						"status":  "error",
-						"message": "Admin authorization token required or invalid",
-					})
-					return
-				}
-				break
+		// Public endpoints: "/", "/api/status", "/api/test-dns", "/api/verify-token"
+		// Everything else (/api/queries, /api/stream, /api/devices, /api/upstreams, /api/config-raw, /api/config-save, /api/restart, /api/flush-cache) requires token!
+		publicEndpoints := map[string]bool{
+			"/":                 true,
+			"/api/status":       true,
+			"/api/test-dns":     true,
+			"/api/verify-token": true,
+		}
+
+		if ws.token != "" && !publicEndpoints[r.URL.Path] {
+			if !ws.isAuthorized(r) {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"status":  "error",
+					"message": "Admin authorization token required or invalid",
+				})
+				return
 			}
 		}
 
@@ -222,7 +244,6 @@ func (ws *webServer) registerRoutes() {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		_, _ = fmt.Fprintf(w, ": connected\n\n")
 		flusher.Flush()
@@ -286,9 +307,6 @@ func (ws *webServer) registerRoutes() {
 			if strings.HasPrefix(authHdr, "Bearer ") {
 				token = strings.TrimPrefix(authHdr, "Bearer ")
 			}
-		}
-		if token == "" {
-			token = r.URL.Query().Get("token")
 		}
 
 		if ws.token == "" || (token != "" && token == ws.token) {

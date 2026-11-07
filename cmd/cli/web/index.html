@@ -667,13 +667,6 @@
   let isAdmin = false;
   let authToken = localStorage.getItem('ctrld_auth_token') || '';
 
-  // Check URL query param ?token=...
-  const urlParamToken = new URLSearchParams(window.location.search).get('token');
-  if (urlParamToken) {
-    authToken = urlParamToken;
-    localStorage.setItem('ctrld_auth_token', authToken);
-  }
-
   function getAuthHeaders(includeJson = true) {
     const h = {};
     if (includeJson) h['Content-Type'] = 'application/json';
@@ -732,7 +725,11 @@
       if (btnDiscard) {
         btnDiscard.disabled = false;
       }
+
       loadConfigRaw();
+      loadUpstreams();
+      loadDevices();
+      loadInitialQueries().then(() => connectSSE());
     } else {
       if (btnToggle) {
         btnToggle.style.background = 'rgba(245, 158, 11, 0.15)';
@@ -770,6 +767,15 @@
       if (btnDiscard) {
         btnDiscard.disabled = true;
       }
+
+      if (sseAbortController) {
+        sseAbortController.abort();
+        sseAbortController = null;
+      }
+      allEvents = [];
+      renderLockedFeed();
+      loadDevices();
+      loadUpstreams();
       loadConfigRaw();
     }
   }
@@ -1247,8 +1253,23 @@
 
   async function loadUpstreams() {
     const container = document.getElementById('upstreams-list');
+    if (!container) return;
+    if (!isAdmin) {
+      container.innerHTML = `
+        <div style="text-align:center; padding:36px 16px; color:var(--muted-foreground); border:1px solid var(--card-border); border-radius:12px; background:rgba(11,15,25,0.5);">
+          <div style="font-size:20px; margin-bottom:8px;">🔒</div>
+          <div style="font-weight:700; font-size:13px; color:var(--foreground); margin-bottom:4px;">Upstream Chain Details are Protected</div>
+          <div style="font-size:11px; margin-bottom:14px;">Admin authentication required to view upstream endpoints, failover order, and credentials.</div>
+          <button onclick="openAuthModal()" style="background:var(--amber); color:#000; font-weight:700; border:none; padding:6px 14px; border-radius:6px; cursor:pointer;">Unlock Upstreams</button>
+        </div>`;
+      return;
+    }
     try {
-      const res = await fetch('/api/upstreams');
+      const res = await fetch('/api/upstreams', { headers: getAuthHeaders(false) });
+      if (res.status === 401) {
+        setAdminState(false);
+        return;
+      }
       const list = await res.json();
       if (!Array.isArray(list) || list.length === 0) return;
 
@@ -1290,10 +1311,19 @@
   }
 
   async function loadDevices() {
+    const sel = document.getElementById('dev-filter');
+    if (!sel) return;
+    if (!isAdmin) {
+      sel.innerHTML = '<option value="all">Protected (Admin required)</option>';
+      return;
+    }
     try {
-      const res = await fetch('/api/devices');
+      const res = await fetch('/api/devices', { headers: getAuthHeaders(false) });
+      if (res.status === 401) {
+        setAdminState(false);
+        return;
+      }
       const list = await res.json();
-      const sel = document.getElementById('dev-filter');
       const cur = sel.value;
       sel.innerHTML = '<option value="all">All devices</option>';
       if (Array.isArray(list)) {
@@ -1332,25 +1362,83 @@
     }
   }
 
-  function connectSSE() {
-    const evtSource = new EventSource('/api/stream');
-    evtSource.onmessage = function(event) {
-      try {
-        const data = JSON.parse(event.data);
-        addQuery(data);
-      } catch(e) {}
-    };
-    evtSource.onerror = function() {
-      evtSource.close();
-      setTimeout(connectSSE, 2500);
-    };
+  let sseAbortController = null;
+
+  async function connectSSE() {
+    if (!isAdmin || !authToken) return;
+    if (sseAbortController) {
+      sseAbortController.abort();
+    }
+    sseAbortController = new AbortController();
+
+    try {
+      const response = await fetch('/api/stream', {
+        headers: getAuthHeaders(false),
+        signal: sseAbortController.signal
+      });
+
+      if (response.status === 401) {
+        setAdminState(false);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const match = line.match(/^data:\s*(.+)$/m);
+          if (match) {
+            try {
+              const data = JSON.parse(match[1]);
+              addQuery(data);
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError' && isAdmin) {
+        setTimeout(connectSSE, 3000);
+      }
+    }
+  }
+
+  function renderLockedFeed() {
+    const tbody = document.getElementById('feed-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center; padding:44px 16px; color:var(--muted-foreground);">
+          <div style="font-size:24px; margin-bottom:8px;">🔒</div>
+          <div style="font-weight:700; font-size:14px; color:var(--foreground); margin-bottom:6px;">Live Query Telemetry is Protected</div>
+          <div style="font-size:12px; max-width:440px; margin:0 auto 16px auto; line-height:1.5;">Admin authentication is required to inspect real-time DNS queries and network client device activity.</div>
+          <button onclick="openAuthModal()" style="background:var(--amber); color:#000; font-weight:700; border:none; padding:7px 16px; border-radius:8px; cursor:pointer; font-size:12px;">Unlock Live Stream</button>
+        </td>
+      </tr>`;
   }
 
   async function loadInitialQueries() {
+    if (!isAdmin) {
+      renderLockedFeed();
+      return;
+    }
     try {
-      const res = await fetch('/api/queries?limit=100');
-      if (!res.ok) return;
+      const res = await fetch('/api/queries?limit=100', { headers: getAuthHeaders(false) });
+      if (!res.ok) {
+        if (res.status === 401) setAdminState(false);
+        return;
+      }
       const list = await res.json();
+      allEvents = [];
+      const tbody = document.getElementById('feed-tbody');
+      if (tbody) tbody.innerHTML = '';
       if (Array.isArray(list)) {
         for (let i = list.length - 1; i >= 0; i--) {
           addQuery(list[i]);
@@ -1360,12 +1448,17 @@
   }
 
   // Init
-  checkInitialAuth();
+  checkInitialAuth().then(() => {
+    if (!isAdmin) {
+      renderLockedFeed();
+      loadUpstreams();
+      loadConfigRaw();
+      loadDevices();
+    }
+  });
   refreshStatus();
-  loadDevices();
   setInterval(refreshStatus, 4000);
-  setInterval(loadDevices, 15000);
-  loadInitialQueries().then(() => connectSSE());
+  setInterval(() => { if (isAdmin) loadDevices(); }, 15000);
 
   const tomlTextarea = document.getElementById('toml-editor');
   if (tomlTextarea) {

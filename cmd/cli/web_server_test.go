@@ -6,9 +6,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -726,5 +728,129 @@ func TestCertificateGenerationAndDeduplication(t *testing.T) {
 	fp := getCertSHA256Fingerprint(certFile)
 	if fp == "" || !strings.Contains(fp, ":") {
 		t.Errorf("expected valid SHA-256 fingerprint, got %s", fp)
+	}
+}
+
+func TestReadTailLines(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "test.log")
+
+	// Case 1: Empty file
+	if err := os.WriteFile(tmpFile, []byte(""), 0644); err != nil {
+		t.Fatalf("failed to create empty file: %v", err)
+	}
+	lines, err := readTailLines(tmpFile, 100)
+	if err != nil || len(lines) != 0 {
+		t.Errorf("expected 0 lines for empty file, got %d, err: %v", len(lines), err)
+	}
+
+	// Case 2: 10 lines, request 5
+	var sb strings.Builder
+	for i := 1; i <= 10; i++ {
+		sb.WriteString(fmt.Sprintf("line %02d\n", i))
+	}
+	if err := os.WriteFile(tmpFile, []byte(sb.String()), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	lines, err = readTailLines(tmpFile, 5)
+	if err != nil {
+		t.Fatalf("readTailLines failed: %v", err)
+	}
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines, got %d", len(lines))
+	}
+	if lines[0] != "line 06" || lines[4] != "line 10" {
+		t.Errorf("unexpected lines content: first=%s, last=%s", lines[0], lines[4])
+	}
+
+	// Case 3: Large file > 300KB (exceeds maxTailBytes 256KB)
+	largeFile := filepath.Join(t.TempDir(), "large.log")
+	f, err := os.Create(largeFile)
+	if err != nil {
+		t.Fatalf("create large file failed: %v", err)
+	}
+	// Write 10,000 lines (~350 KB)
+	for i := 1; i <= 10000; i++ {
+		fmt.Fprintf(f, "2026-11-07 12:00:00 INF log entry number %06d for tail testing\n", i)
+	}
+	f.Close()
+
+	lines, err = readTailLines(largeFile, 20)
+	if err != nil {
+		t.Fatalf("readTailLines on large file failed: %v", err)
+	}
+	if len(lines) != 20 {
+		t.Fatalf("expected 20 lines from large file, got %d", len(lines))
+	}
+	expectedLast := "2026-11-07 12:00:00 INF log entry number 010000 for tail testing"
+	if lines[19] != expectedLast {
+		t.Errorf("expected last line %q, got %q", expectedLast, lines[19])
+	}
+}
+
+func TestWebLogsAndDiagEndpoints(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "ctrld.log")
+	_ = os.WriteFile(logFile, []byte("line 1\nline 2\nline 3\n"), 0644)
+
+	p := &prog{
+		cfg: &ctrld.Config{
+			Service: ctrld.ServiceConfig{
+				LogPath: logFile,
+			},
+			Web: &ctrld.WebConfig{
+				Enable:   true,
+				ListenIP: "127.0.0.1",
+				Port:     0,
+				CertDir:  tmpDir,
+			},
+		},
+		webRingBuf: NewWebRingBuffer(10),
+	}
+
+	ws, err := p.newWebServer()
+	if err != nil {
+		t.Fatalf("newWebServer failed: %v", err)
+	}
+
+	// Create valid session
+	sid, err := ws.sm.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	// Test GET /api/logs with session
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?lines=2", nil)
+	req.Host = "127.0.0.1"
+	req.AddCookie(&http.Cookie{Name: "ctrld_session", Value: sid})
+	rec := httptest.NewRecorder()
+	ws.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/logs expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var logsResp struct {
+		Lines []string `json:"lines"`
+		Count int      `json:"count"`
+		Path  string   `json:"path"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&logsResp); err != nil {
+		t.Fatalf("failed to decode logs JSON: %v", err)
+	}
+	if logsResp.Count != 2 || len(logsResp.Lines) != 2 {
+		t.Errorf("expected 2 lines, got %d", logsResp.Count)
+	}
+	if logsResp.Lines[0] != "line 2" || logsResp.Lines[1] != "line 3" {
+		t.Errorf("unexpected lines: %v", logsResp.Lines)
+	}
+
+	// Test unauthenticated access to /api/logs
+	unauthReq := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+	unauthReq.Host = "127.0.0.1"
+	unauthRec := httptest.NewRecorder()
+	ws.server.Handler.ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for /api/logs without session, got %d", unauthRec.Code)
 	}
 }

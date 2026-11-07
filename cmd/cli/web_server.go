@@ -1077,6 +1077,157 @@ func (ws *webServer) registerRoutes() {
 			_ = ws.p.reloadConfig()
 		}()
 	})
+
+	// GET /api/logs
+	ws.mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		linesCount := 150
+		if lStr := r.URL.Query().Get("lines"); lStr != "" {
+			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+				linesCount = l
+			}
+		}
+		if linesCount > 500 {
+			linesCount = 500
+		}
+
+		logPath := "/data/controld/ctrld.log"
+		if ws.p.cfg != nil && ws.p.cfg.Service.LogPath != "" {
+			logPath = ws.p.cfg.Service.LogPath
+		}
+
+		lines, err := readTailLines(logPath, linesCount)
+		if err != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"lines": []string{},
+				"count": 0,
+				"path":  logPath,
+				"error": err.Error(),
+			})
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"lines": lines,
+			"count": len(lines),
+			"path":  logPath,
+		})
+	})
+
+	// GET /api/nextdns-diag
+	ws.mux.HandleFunc("/api/nextdns-diag", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		client := &http.Client{
+			Timeout: 3 * time.Second,
+		}
+
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://test.nextdns.io", nil)
+		if err != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "error",
+				"error":  err.Error(),
+			})
+			return
+		}
+		req.Header.Set("User-Agent", "ctrld-webui/v3.20")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "error",
+				"error":  fmt.Sprintf("Failed to query test.nextdns.io: %v", err),
+			})
+			return
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		if err != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "error",
+				"error":  fmt.Sprintf("Failed to read diagnostic response: %v", err),
+			})
+			return
+		}
+
+		var resMap map[string]any
+		if err := json.Unmarshal(body, &resMap); err != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "error",
+				"error":  fmt.Sprintf("Invalid response JSON: %v", err),
+				"raw":    string(body),
+			})
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(resMap)
+	})
+}
+
+// readTailLines reads up to maxLines from the end of the specified file, seeking up to 256KB from the end
+// to ensure low memory consumption.
+func readTailLines(filePath string, maxLines int) ([]string, error) {
+	if maxLines <= 0 {
+		maxLines = 150
+	}
+	if maxLines > 500 {
+		maxLines = 500
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	size := fi.Size()
+	if size == 0 {
+		return []string{}, nil
+	}
+
+	const maxTailBytes = int64(256 * 1024) // 256 KB
+	var offset int64
+	if size > maxTailBytes {
+		offset = size - maxTailBytes
+	}
+
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	buf, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	content := string(buf)
+	// If we didn't start from offset 0, the first line is likely partial; drop it.
+	if offset > 0 {
+		if idx := strings.IndexByte(content, '\n'); idx != -1 {
+			content = content[idx+1:]
+		}
+	}
+
+	rawLines := strings.Split(content, "\n")
+	lines := make([]string, 0, len(rawLines))
+	for _, l := range rawLines {
+		l = strings.TrimRight(l, "\r")
+		if l != "" {
+			lines = append(lines, l)
+		}
+	}
+
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+
+	return lines, nil
 }
 
 func (p *prog) reloadConfig() error {

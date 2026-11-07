@@ -173,10 +173,11 @@ type Config struct {
 
 // WebConfig specifies the embedded web management interface config.
 type WebConfig struct {
-	Enable    bool   `mapstructure:"enable" toml:"enable"`
-	ListenIP  string `mapstructure:"listen_ip" toml:"listen_ip,omitempty"`
-	Port      int    `mapstructure:"port" toml:"port,omitempty"`
-	AuthToken string `mapstructure:"auth_token" toml:"auth_token,omitempty"`
+	Enable       bool   `mapstructure:"enable" toml:"enable"`
+	ListenIP     string `mapstructure:"listen_ip" toml:"listen_ip,omitempty"`
+	Port         int    `mapstructure:"port" toml:"port,omitempty"`
+	PasswordHash string `mapstructure:"password_hash" toml:"password_hash,omitempty"`
+	CertDir      string `mapstructure:"cert_dir" toml:"cert_dir,omitempty"`
 }
 
 // HasUpstreamSendClientInfo reports whether the config has any upstream

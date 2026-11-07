@@ -145,6 +145,7 @@ func initCLI() {
 	initUpgradeCmd()
 	initLogCmd()
 	initDiagCmd()
+	initWebPasswdCmd()
 }
 
 // isMobile reports whether the current OS is a mobile platform.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Control-D-Inc/ctrld"
 	"github.com/miekg/dns"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestWebRingBuffer(t *testing.T) {
@@ -67,6 +68,7 @@ func TestWebServerEndpoints(t *testing.T) {
 				Enable:   true,
 				ListenIP: "127.0.0.1",
 				Port:     0,
+				CertDir:  t.TempDir(),
 			},
 			Upstream: map[string]*ctrld.UpstreamConfig{
 				"0": {
@@ -95,7 +97,7 @@ func TestWebServerEndpoints(t *testing.T) {
 		t.Errorf("missing expected title in index.html")
 	}
 
-	// 2. Test GET /api/status
+	// 2. Test GET /api/status (direct handler test)
 	req = httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	rec = httptest.NewRecorder()
 	ws.mux.ServeHTTP(rec, req)
@@ -110,7 +112,7 @@ func TestWebServerEndpoints(t *testing.T) {
 		t.Errorf("expected non-empty version in status")
 	}
 
-	// 3. Test GET /api/queries
+	// 3. Test GET /api/queries (direct handler test)
 	p.webRingBuf.Add(WebQueryEvent{
 		Domain:   "apple.com",
 		Qtype:    "A",
@@ -149,34 +151,45 @@ func TestWebServerEndpoints(t *testing.T) {
 	sseReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/stream", nil)
 	sseResp, err := http.DefaultClient.Do(sseReq)
 	if err != nil {
-		t.Fatalf("SSE request failed: %v", err)
+		t.Fatalf("SSE connection failed: %v", err)
 	}
 	defer sseResp.Body.Close()
 
-	reader := bufio.NewReader(sseResp.Body)
-	// Initial comment
-	line, _ := reader.ReadString('\n')
-	if !strings.HasPrefix(line, ": connected") {
-		t.Errorf("expected ': connected', got %q", line)
+	if sseResp.StatusCode != http.StatusOK {
+		t.Fatalf("SSE returned status %d", sseResp.StatusCode)
+	}
+	if sseResp.Header.Get("Content-Type") != "text/event-stream" {
+		t.Errorf("expected text/event-stream, got %s", sseResp.Header.Get("Content-Type"))
 	}
 
-	// Send an event
+	scanner := bufio.NewScanner(sseResp.Body)
+	// Read initial connected comment
+	if scanner.Scan() {
+		line := scanner.Text()
+		if !strings.Contains(line, ": connected") {
+			t.Errorf("expected ': connected' comment, got: %s", line)
+		}
+	}
+
+	// Broadcast an event
 	p.webRingBuf.Add(WebQueryEvent{
 		Domain: "live-event.org",
-		Status: "BLOCKED",
+		Qtype:  "A",
+		Status: "RESOLVED",
 	})
 
-	// Wait for event data
 	found := false
-	for i := 0; i < 5; i++ {
-		line, err = reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		if strings.HasPrefix(line, "data: ") {
-			if strings.Contains(line, "live-event.org") {
-				found = true
-				break
+	timeout := time.After(2 * time.Second)
+	for !found {
+		select {
+		case <-timeout:
+			t.Fatal("timed out waiting for SSE live event")
+		default:
+			if scanner.Scan() {
+				line := scanner.Text()
+				if strings.Contains(line, "live-event.org") {
+					found = true
+				}
 			}
 		}
 	}
@@ -185,101 +198,176 @@ func TestWebServerEndpoints(t *testing.T) {
 	}
 }
 
-func TestWebAuthToken(t *testing.T) {
+func TestWebSessionAuth(t *testing.T) {
+	testPassword := "CorrectAdminPass123!"
+	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+
+	certDir := t.TempDir()
+
 	p := &prog{
 		cfg: &ctrld.Config{
 			Web: &ctrld.WebConfig{
-				Enable:    true,
-				ListenIP:  "192.168.20.1",
-				Port:      5380,
-				AuthToken: "secret123",
+				Enable:       true,
+				ListenIP:     "192.168.20.1",
+				Port:         5380,
+				PasswordHash: string(hash),
+				CertDir:      certDir,
 			},
 		},
 	}
-	ws, _ := p.newWebServer()
+	ws, err := p.newWebServer()
+	if err != nil {
+		t.Fatalf("newWebServer failed: %v", err)
+	}
 	handler := ws.authMiddleware(ws.mux)
 
-	baseURL := "http://192.168.20.1:5380"
+	baseURL := "https://192.168.20.1:5380"
 
-	// Read-only endpoint is accessible without token, but reports is_admin=false
-	req := httptest.NewRequest(http.MethodGet, baseURL+"/api/status", nil)
+	// 1. Root / is accessible without cookie (shows login UI)
+	req := httptest.NewRequest(http.MethodGet, baseURL+"/", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK for read-only /api/status without token, got %d", rec.Code)
-	}
-	var st map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &st)
-	if st["is_admin"] != false {
-		t.Errorf("expected is_admin=false without token, got %v", st["is_admin"])
+		t.Errorf("expected 200 OK for / without cookie, got %d", rec.Code)
 	}
 
-	// Read-only endpoint with token reports is_admin=true
+	// 2. /api/auth-check reports configured=true, authenticated=false
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/auth-check", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /api/auth-check, got %d", rec.Code)
+	}
+	var checkResp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &checkResp)
+	if checkResp["configured"] != true || checkResp["authenticated"] != false {
+		t.Errorf("unexpected auth-check resp: %+v", checkResp)
+	}
+
+	// 3. Protected endpoints return 401 Unauthorized without session cookie
+	protectedPaths := []string{
+		"/api/status",
+		"/api/queries",
+		"/api/devices",
+		"/api/upstreams",
+		"/api/restart",
+		"/api/flush-cache",
+		"/api/config-raw",
+	}
+	for _, path := range protectedPaths {
+		req = httptest.NewRequest(http.MethodGet, baseURL+path, nil)
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("expected 401 Unauthorized for %s without session, got %d", path, rec.Code)
+		}
+	}
+
+	// 4. Failed login attempt (wrong password) -> 401
+	loginBody := strings.NewReader(`{"password":"WrongPassword!"}`)
+	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/login", loginBody)
+	req.RemoteAddr = "192.168.20.100:12345"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for wrong password, got %d", rec.Code)
+	}
+
+	// 5. Brute-force protection: 4 more failed attempts from same IP (total 5) -> lockout (429)
+	for i := 0; i < 4; i++ {
+		loginBody = strings.NewReader(`{"password":"WrongPassword!"}`)
+		req = httptest.NewRequest(http.MethodPost, baseURL+"/api/login", loginBody)
+		req.RemoteAddr = "192.168.20.100:12345"
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+	}
+	// 6th attempt should return 429 Too Many Requests
+	loginBody = strings.NewReader(`{"password":"CorrectAdminPass123!"}`)
+	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/login", loginBody)
+	req.RemoteAddr = "192.168.20.100:12345"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 Too Many Requests after 5 failures, got %d", rec.Code)
+	}
+
+	// 6. Successful login from another client IP
+	loginBody = strings.NewReader(`{"password":"CorrectAdminPass123!"}`)
+	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/login", loginBody)
+	req.RemoteAddr = "192.168.20.101:12345"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for correct password, got %d", rec.Code)
+	}
+
+	// Verify session cookie attributes: HttpOnly, Secure, SameSite=Strict
+	var sessionCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "ctrld_session" {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatalf("expected ctrld_session cookie in response")
+	}
+	if !sessionCookie.HttpOnly {
+		t.Errorf("expected session cookie HttpOnly=true")
+	}
+	if !sessionCookie.Secure {
+		t.Errorf("expected session cookie Secure=true")
+	}
+	if sessionCookie.SameSite != http.SameSiteStrictMode {
+		t.Errorf("expected session cookie SameSite=Strict, got %v", sessionCookie.SameSite)
+	}
+
+	// 7. Access protected endpoint with valid session cookie -> 200 OK
 	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/status", nil)
-	req.Header.Set("X-Auth-Token", "secret123")
+	req.AddCookie(sessionCookie)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK for /api/status with token, got %d", rec.Code)
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &st)
-	if st["is_admin"] != true {
-		t.Errorf("expected is_admin=true with valid token, got %v", st["is_admin"])
+		t.Errorf("expected 200 OK for /api/status with valid session, got %d", rec.Code)
 	}
 
-	// Protected admin endpoint (/api/restart) without token -> 401
-	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/restart", nil)
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 Unauthorized for /api/restart without token, got %d", rec.Code)
-	}
-
-	// Protected admin endpoint (/api/restart) with valid token -> 200
-	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/restart", nil)
-	req.Header.Set("X-Auth-Token", "secret123")
+	// 8. Logout: POST /api/logout
+	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/logout", nil)
+	req.AddCookie(sessionCookie)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK for /api/restart with valid token, got %d", rec.Code)
+		t.Errorf("expected 200 OK for /api/logout, got %d", rec.Code)
 	}
 
-	// Protected sensitive endpoint (/api/config-raw) without token -> 401
-	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/config-raw", nil)
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 Unauthorized for /api/config-raw without token, got %d", rec.Code)
-	}
-
-	// Protected sensitive endpoint (/api/config-raw) with valid token -> 200
-	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/config-raw", nil)
-	req.Header.Set("X-Auth-Token", "secret123")
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK for /api/config-raw with valid token, got %d", rec.Code)
-	}
-
-	// Protected telemetry endpoint (/api/queries) without token -> 401
-	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/queries", nil)
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 Unauthorized for /api/queries without token, got %d", rec.Code)
-	}
-
-	// Protected telemetry endpoint (/api/queries) with valid token -> 200
-	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/queries", nil)
-	req.Header.Set("X-Auth-Token", "secret123")
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK for /api/queries with valid token, got %d", rec.Code)
-	}
-
-	// Host header validation: rogue host -> 403
+	// 9. Subsequent request with invalidated cookie -> 401
 	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/status", nil)
+	req.AddCookie(sessionCookie)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized after logout, got %d", rec.Code)
+	}
+
+	// 10. Security header checks
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Header().Get("X-Frame-Options") != "DENY" {
+		t.Errorf("missing or invalid X-Frame-Options header")
+	}
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("missing or invalid X-Content-Type-Options header")
+	}
+	if rec.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Errorf("missing or invalid Referrer-Policy header")
+	}
+
+	// 11. Host header validation: rogue host -> 403
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/", nil)
 	req.Host = "evil-domain.com"
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -287,36 +375,13 @@ func TestWebAuthToken(t *testing.T) {
 		t.Errorf("expected 403 Forbidden for rogue Host header, got %d", rec.Code)
 	}
 
-	// Cross-origin check: rogue origin -> 403
-	req = httptest.NewRequest(http.MethodGet, baseURL+"/api/status", nil)
+	// 12. Cross-origin validation: rogue Origin -> 403
+	req = httptest.NewRequest(http.MethodGet, baseURL+"/", nil)
 	req.Header.Set("Origin", "http://malicious-site.com")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("expected 403 Forbidden for malicious Origin, got %d", rec.Code)
-	}
-
-	// Verify security headers
-	if rec.Header().Get("X-Frame-Options") != "DENY" {
-		t.Errorf("missing or invalid X-Frame-Options header")
-	}
-	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
-		t.Errorf("missing or invalid X-Content-Type-Options header")
-	}
-
-	// Verify token endpoint
-	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/verify-token", strings.NewReader(`{"token":"wrong"}`))
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 for wrong token, got %d", rec.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodPost, baseURL+"/api/verify-token", strings.NewReader(`{"token":"secret123"}`))
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 for correct token, got %d", rec.Code)
 	}
 }
 
@@ -374,7 +439,10 @@ func TestConfigSaveValidation(t *testing.T) {
 
 	p := &prog{
 		cfg: &ctrld.Config{
-			Web: &ctrld.WebConfig{Enable: true},
+			Web: &ctrld.WebConfig{
+				Enable:  true,
+				CertDir: tmpDir,
+			},
 		},
 	}
 	ws, _ := p.newWebServer()
@@ -414,6 +482,82 @@ func TestConfigSaveValidation(t *testing.T) {
 	saved, _ := os.ReadFile(cfgFile)
 	if string(saved) != validToml {
 		t.Errorf("saved content mismatch: %s", string(saved))
+	}
+}
+
+func TestWebPasswdCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := tmpDir + "/ctrld.toml"
+	initialConfig := "[service]\n  cache_size = 1024\n[web]\n  enable = true\n  auth_token = 'old-leaked-token'\n"
+	if err := os.WriteFile(cfgFile, []byte(initialConfig), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	testPass := "MySecretPassword123!"
+	if err := setWebPasswordInConfigFile(cfgFile, testPass); err != nil {
+		t.Fatalf("setWebPasswordInConfigFile failed: %v", err)
+	}
+
+	updated, err := os.ReadFile(cfgFile)
+	if err != nil {
+		t.Fatalf("failed to read updated config: %v", err)
+	}
+	content := string(updated)
+
+	// auth_token must be removed
+	if strings.Contains(content, "auth_token") {
+		t.Errorf("expected auth_token to be stripped, found in: %s", content)
+	}
+	// password_hash must be present
+	if !strings.Contains(content, "password_hash") {
+		t.Errorf("expected password_hash in config, got: %s", content)
+	}
+
+	// Verify hash with bcrypt
+	var cfgMap map[string]any
+	if err := json.Unmarshal([]byte(`{}`), &cfgMap); err != nil {
+		t.Fatal(err)
+	}
+	// Check bcrypt matches password
+	lines := strings.Split(content, "\n")
+	var foundHash string
+	for _, l := range lines {
+		if strings.Contains(l, "password_hash") {
+			parts := strings.Split(l, "=")
+			if len(parts) == 2 {
+				foundHash = strings.Trim(strings.TrimSpace(parts[1]), `'"`)
+			}
+		}
+	}
+	if foundHash == "" {
+		t.Fatalf("could not extract password_hash from: %s", content)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(foundHash), []byte(testPass)); err != nil {
+		t.Errorf("bcrypt verification failed for hash %s: %v", foundHash, err)
+	}
+}
+
+func TestCertificateGeneration(t *testing.T) {
+	tmpDir := t.TempDir()
+	certFile := tmpDir + "/cert.pem"
+	keyFile := tmpDir + "/key.pem"
+
+	err := generateSelfSignedCert(certFile, keyFile, "192.168.20.1")
+	if err != nil {
+		t.Fatalf("generateSelfSignedCert failed: %v", err)
+	}
+
+	// Check files created
+	if _, err := os.Stat(certFile); os.IsNotExist(err) {
+		t.Errorf("cert file was not created")
+	}
+	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
+		t.Errorf("key file was not created")
+	}
+
+	fp := getCertSHA256Fingerprint(certFile)
+	if fp == "" || !strings.Contains(fp, ":") {
+		t.Errorf("expected valid SHA-256 fingerprint, got %s", fp)
 	}
 }
 

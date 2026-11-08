@@ -205,19 +205,31 @@ La versión debe llevar siempre el sufijo `+patched-…` para que ctrld no se au
 | 11-07 13:33 | v3.19.9-webui: opción de 15 filas en el selector |
 | 11-07 13:37 | Limpieza: candidatos, respaldos intermedios y diffs duplicados borrados (`/data/controld` 524 → 77 MB) |
 | 11-07 18:35 | v3.20-webui (Antigravity): filtros rápidos, top talkers, prueba en resolver a 1 clic, diagnóstico NextDNS en vivo, visor de logs del sistema (/api/logs), y exportación a CSV |
+| 11-08 12:45 | v3.21-webui: alias de dispositivos persistentes (`/api/devices/aliases`), botón limpiar en Live Resolver, sparkline de 60m en ribbon superior |
+| 11-08 15:35 | v3.22-webui: rediseño del panel de salud, clarificación de actividad reciente en top talkers, semáforo inteligente de failover, sondeo horario de latencia en standby y tabla de upstreams a ancho completo |
 
-## 9. Funcionalidades del Panel Web (v3.20-webui)
+## 9. Funcionalidades del Panel Web (v3.22-webui)
 
 1. **Filtros Rápidos en Live Feed:** Botones de filtro instantáneo `[ All ]`, `[ ✖ Blocked ]`, `[ ✔ Allowed ]`, `[ ⚡ Cached ]`.
-2. **Top Talkers & Estadísticas en Vivo:** Top 5 dispositivos activos, Top 5 dominios bloqueados y Top 5 dominios permitidos calculados en tiempo real; clic en cualquier chip filtra automáticamente la tabla.
-3. **Prueba de Dominio a 1 Clic:** Al hacer clic en cualquier dominio del Live Feed, navega automáticamente a la pestaña "Live DNS Resolver", pre-rellena el dominio y ejecuta la consulta en tiempo real.
-4. **Diagnóstico Oficial NextDNS en Vivo:** Pestaña Upstreams con botón `[ ⚡ Run NextDNS Live Diagnostic ]` que consulta `/api/nextdns-diag` (`test.nextdns.io`) directamente desde la WAN de Firewalla para verificar PoP (anexia-atl-1), protocolo (DOH3) y Anycast.
-5. **Visor de Logs del Sistema (Pestaña 5):** Consulta `/api/logs` con lectura eficiente y acotada del final de `/data/controld/ctrld.log` (máx. 256 KB, hasta 500 líneas), auto-scroll, selector de líneas, filtro de búsqueda y auto-refresco (5s).
-6. **Exportación de Historial a CSV:** Botón `[ 📥 Export CSV ]` en la barra de herramientas del Live Feed que descarga `ctrld-queries-YYYY-MM-DD_HHMM.csv` de forma 100% offline en el navegador.
+2. **Top Talkers (Recent) & Estadísticas en Vivo:** Top 5 dispositivos activos, Top 5 dominios bloqueados y Top 5 dominios permitidos calculados sobre el buffer de sesión reciente en memoria; clarificado con el sufijo `(Recent)`. Clic en cualquier chip filtra automáticamente la tabla.
+3. **Alias Personalizados de Dispositivos:** Modal emergente accesible haciendo clic en el nombre de cualquier dispositivo en el Live Feed o en Top Talkers. Permite asignar nombres amigables (ej. `PC Oficina`, `Wemo Living Room`). Persisten de forma quirúrgica en `/data/controld/device_aliases.json` mediante `/api/devices/aliases`.
+4. **Sondeo Periódico de Latencia en Standby (Hourly Probe):** Proceso en segundo plano que sondea cada 1 hora (y una vez a los 5 segundos de arrancar) a los upstreams en espera (Cloudflare Families, Quad9, AT&T) mediante una consulta estándar DNS (`example.com`). Permite visualizar en la tarjeta de Upstreams su latencia real de contingencia (ej. `4.0 ms`, `20.1 ms`, `32.0 ms`) en lugar del texto fijo de timeout (`1500 ms t/o`), con consumo ínfimo (solo 3 consultas/hora).
+5. **Semáforo Unificado y Failover Inteligente:**
+   - Si NextDNS resuelve sin degradación actual, el semáforo permanece en verde **🟢 100% Operational**, documentando eventos transitorios pasados como recuperados.
+   - La tarjeta de contingencia muestra explícitamente **`NextDNS (Active)`** en verde y relegated el último fallback al subtítulo para evitar confusión con desvíos permanentes.
+6. **Tabla de Upstreams a Ancho Completo:** Se retiró el bloque secundario de códigos de respuesta (*NOERROR / NXDOMAIN*) y la gráfica duplicada de QPM, otorgándole a la tabla **"Upstream Redundancy & Answers"** el 100% del ancho del contenedor para una lectura limpia de roles, fallos y porcentajes de tráfico.
+7. **Prueba de Dominio a 1 Clic con Botón Limpiar:** Navega desde cualquier fila del feed al simulador `dig` en Firewalla. Incluye botón `[ ✕ Clear ]` para reiniciar el campo rápidamente.
+8. **Diagnóstico Oficial NextDNS en Vivo:** Pestaña Upstreams con botón `[ ⚡ Run NextDNS Live Diagnostic ]` que consulta `/api/nextdns-diag` (`test.nextdns.io`) directamente desde la WAN de Firewalla para verificar PoP (anexia-atl-1), protocolo (DOH3) y Anycast.
+9. **Visor de Logs del Sistema (Pestaña 5):** Consulta `/api/logs` con lectura eficiente y acotada del final de `/data/controld/ctrld.log` (máx. 256 KB, hasta 500 líneas), auto-scroll, selector de líneas, filtro de búsqueda y auto-refresco (5s).
+10. **Exportación de Historial a CSV:** Botón `[ 📥 Export CSV ]` en la barra de herramientas del Live Feed que descarga `ctrld-queries-YYYY-MM-DD_HHMM.csv` de forma 100% offline en el navegador.
+11. **Gráfico de Tendencia 60m en Ribbon Superior:** Mini sparkline SVG integrado en la tarjeta de actividad que grafica los últimos 60 minutos de tráfico con cálculo automático de pico y promedio por minuto.
 
-## 10. Pendientes
+## 10. Mantenimiento y Buenas Prácticas
 
-- Observar la v3.19.9 unos días.
-- Antigravity: publicar la rama `firewalla-v3.19.9-webui` (diff acumulado `/data/controld/patches-v3.19.1-to-v3.19.9.diff`).
-- `GUIA_ADMINISTRACION_detallada.md` es de la v3.16 (histórica); esta guía es la vigente.
-- Borrar los candidatos `ctrld.v3.19*-candidate` cuando se confirme la estabilidad.
+- **Reemplazo Atómico:** Para actualizar la versión en ejecución, transferir el binario candidato a `/data/controld/ctrld.v3.22-candidate` y aplicar:
+  ```bash
+  sudo mv /data/controld/ctrld.v3.22-candidate /data/controld/ctrld
+  sudo systemctl restart ctrld
+  ```
+- **Control de RAM:** La huella de memoria residente (RSS) de `ctrld` se mantiene en el rango de ~14 MB a ~36 MB tras varias horas de operación.
+- **Git Branch:** El código fuente oficial de la interfaz y parches se gestiona en la rama `firewalla-v3.22-webui`.

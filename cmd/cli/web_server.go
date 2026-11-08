@@ -185,6 +185,19 @@ type webServer struct {
 	sm        *sessionManager
 	started   bool
 	startTime time.Time
+
+	// done closes when the server shuts down, so long-lived SSE streams return
+	// and Shutdown does not wait out its timeout.
+	done     chan struct{}
+	doneOnce sync.Once
+
+	// certNotAfter is the expiry of the panel certificate, read at start.
+	certNotAfter time.Time
+
+	// cpuMu guards the previous CPU sample used for the CPU % of /api/status.
+	cpuMu       sync.Mutex
+	lastCPU     time.Duration
+	lastCPUWall time.Time
 }
 
 func (p *prog) webUIEnabled() bool {
@@ -340,6 +353,7 @@ func (p *prog) newWebServer() (*webServer, error) {
 		certDir:   certDir,
 		sm:        p.webSessionManager(),
 		startTime: time.Now(),
+		done:      make(chan struct{}),
 	}
 
 	ws.server = &http.Server{
@@ -348,6 +362,9 @@ func (p *prog) newWebServer() (*webServer, error) {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+	ws.server.RegisterOnShutdown(func() {
+		ws.doneOnce.Do(func() { close(ws.done) })
+	})
 
 	ws.registerRoutes()
 	return ws, nil
@@ -632,6 +649,8 @@ func (ws *webServer) registerRoutes() {
 			"mem_sys_mb":    float64(m.Sys) / (1024 * 1024),
 			"cache_items":   cacheItems,
 			"cache_size":    ws.p.cfg.Service.CacheSize,
+			"cpu_pct":       ws.cpuPercent(),
+			"cpu_cores":     runtime.NumCPU(),
 			"queries":       ws.p.webRingBuf.Stats(),
 			"active_upstream": map[string]any{
 				"name":     activeUpstreamName,
@@ -641,6 +660,13 @@ func (ws *webServer) registerRoutes() {
 			},
 		}
 		_ = json.NewEncoder(w).Encode(status)
+	})
+
+	// GET /api/health: health counters since the process started, computed on
+	// request from fixed-size counters and the existing ring buffer.
+	ws.mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(ws.healthReport(time.Now()))
 	})
 
 	// GET /api/queries
@@ -688,6 +714,8 @@ func (ws *webServer) registerRoutes() {
 		for {
 			select {
 			case <-notify:
+				return
+			case <-ws.done:
 				return
 			case ev, ok := <-ch:
 				if !ok {
@@ -1256,6 +1284,11 @@ func (ws *webServer) start() error {
 	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
 		return fmt.Errorf("load TLS keypair: %w", err)
+	}
+	if len(cert.Certificate) > 0 {
+		if leaf, err := x509.ParseCertificate(cert.Certificate[0]); err == nil {
+			ws.certNotAfter = leaf.NotAfter
+		}
 	}
 
 	tlsCfg := &tls.Config{

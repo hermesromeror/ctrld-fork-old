@@ -134,7 +134,10 @@ type prog struct {
 	metricsQueryStats    atomic.Bool
 	// webRingBuf holds recent DNS events for the Web UI. It is created once in
 	// run() and survives reloads; events are recorded only while webActive.
-	webRingBuf                *WebRingBuffer
+	webRingBuf *WebRingBuffer
+	// dnsStats holds the Web UI health counters since the process started
+	// (created once, like webRingBuf; fixed size).
+	dnsStats                  *dnsStats
 	webActive                 atomic.Bool
 	webSessionsMu             sync.Mutex
 	webSessions               *sessionManager

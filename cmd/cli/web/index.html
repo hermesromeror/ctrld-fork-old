@@ -783,21 +783,12 @@
         <div class="health-tile"><div class="ht-label">🔒 WAN Protocol</div><div class="ht-value" id="h-proto" style="font-size:13px;">–</div><div class="ht-sub" id="h-proto-sub"></div></div>
       </div>
 
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:14px; margin-top:12px;">
-        <div>
-          <div class="ht-label" style="margin-bottom:6px;">Upstream Redundancy & Answers</div>
-          <table class="health-table">
-            <thead><tr><th>Upstream</th><th>Role</th><th>Type</th><th style="text-align:right;">Answered</th><th style="text-align:right;">Failed</th><th style="text-align:right;">Share</th></tr></thead>
-            <tbody id="h-upstreams"></tbody>
-          </table>
-        </div>
-        <div>
-          <div class="ht-label" style="margin-bottom:6px;">Response Codes Breakdown (<span id="h-rc-n">0</span> queries)</div>
-          <div id="h-rcodes" class="rc-bar"></div>
-          <div id="h-rcodes-legend" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; font-size:11px;"></div>
-          <div class="ht-label" style="margin:14px 0 6px;">Queries per minute (last hour) <span id="h-qpm-max" style="text-transform:none; font-weight:400;"></span></div>
-          <svg id="h-qpm" viewBox="0 0 300 50" preserveAspectRatio="none" style="width:100%; height:50px; display:block;"></svg>
-        </div>
+      <div style="margin-top:12px;">
+        <div class="ht-label" style="margin-bottom:6px;">Upstream Redundancy & Answers</div>
+        <table class="health-table">
+          <thead><tr><th>Upstream</th><th>Role</th><th>Type</th><th style="text-align:right;">Answered</th><th style="text-align:right;">Failed</th><th style="text-align:right;">Share</th></tr></thead>
+          <tbody id="h-upstreams"></tbody>
+        </table>
       </div>
     </div>
 
@@ -1704,42 +1695,8 @@
       }).join('') || '<tr><td colspan="6" style="color:var(--muted-foreground);">No upstream answers yet</td></tr>';
     }
 
-    // 9. Response codes breakdown
-    const rc = h.rcodes || {};
-    const rcTotal = h.rcode_samples || 0;
-    setText('h-rc-n', n(rcTotal));
-    const rcColors = { NOERROR: '#22c55e', NXDOMAIN: '#60a5fa', SERVFAIL: '#ef4444', REFUSED: '#f97316', NO_ANSWER: '#a855f7' };
-    const rcLabels = { NOERROR: 'Success', NXDOMAIN: 'Non-Existent', SERVFAIL: 'Server Error', REFUSED: 'Refused', NO_ANSWER: 'No Answer' };
-    const rcKeys = Object.keys(rc).sort((a, b) => rc[b] - rc[a]);
-    const bar = document.getElementById('h-rcodes');
-    const legend = document.getElementById('h-rcodes-legend');
-    if (bar && legend) {
-      bar.innerHTML = rcKeys.map(k => `<span style="width:${(100 * rc[k] / rcTotal).toFixed(2)}%; background:${rcColors[k] || '#9ca3af'};" title="${esc(k)} (${rcLabels[k] || k})"></span>`).join('');
-      legend.innerHTML = rcKeys.map(k => {
-        const pct = (100 * rc[k] / rcTotal).toFixed(1);
-        const warn = k === 'SERVFAIL' && rc[k] / rcTotal > 0.01;
-        const friendly = rcLabels[k] ? ` (${rcLabels[k]})` : '';
-        return `<span style="${warn ? 'color:var(--rose); font-weight:700;' : 'color:var(--muted-foreground);'}"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:${rcColors[k] || '#9ca3af'}; margin-right:4px;"></span>${esc(k)}${friendly} ${pct}%</span>`;
-      }).join('');
-    }
-
-    // 10. Queries per minute sparkline
+    // 9. Ribbon sparkline (Metrics ribbon card)
     const qpm = Array.isArray(h.per_minute) ? h.per_minute : [];
-    const svg = document.getElementById('h-qpm');
-    if (svg && qpm.length) {
-      const max = Math.max(1, ...qpm);
-      const w = 300 / qpm.length;
-      svg.innerHTML = qpm.map((v, i) => {
-        const bh = Math.max(v > 0 ? 1.5 : 0, 48 * v / max);
-        const fill = i === qpm.length - 1 ? 'rgba(96,165,250,0.45)' : '#60a5fa';
-        return `<rect x="${(i * w + 0.5).toFixed(2)}" y="${(50 - bh).toFixed(2)}" width="${Math.max(0.5, w - 1).toFixed(2)}" height="${bh.toFixed(2)}" fill="${fill}"><title>${v} queries, ${qpm.length - 1 - i} min ago</title></rect>`;
-      }).join('');
-      const done = qpm.slice(0, -1);
-      const avg = done.length ? Math.round(done.reduce((a, b) => a + b, 0) / done.length) : 0;
-      setText('h-qpm-max', `— peak ${max.toLocaleString()}/min • avg ${avg.toLocaleString()}/min`);
-    }
-
-    // 11. Ribbon sparkline (Metrics ribbon card)
     const ribbonSvg = document.getElementById('ribbon-sparkline');
     if (ribbonSvg && qpm.length) {
       const max = Math.max(1, ...qpm);

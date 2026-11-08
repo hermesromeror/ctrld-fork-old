@@ -311,6 +311,18 @@
     }
     .search-input:focus { border-color: var(--accent); }
 
+    /* Health panel (Upstream Chain tab) */
+    .health-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; }
+    .health-tile { background:rgba(15,23,42,0.6); border:1px solid var(--card-border); border-radius:6px; padding:8px 10px; min-width:0; }
+    .ht-label { font-size:10px; color:var(--muted-foreground); text-transform:uppercase; letter-spacing:0.4px; font-weight:700; }
+    .ht-value { font-size:15px; font-weight:700; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ht-sub { font-size:11px; color:var(--muted-foreground); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .health-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .health-table th { font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:700; text-align:left; padding:4px 6px; border-bottom:1px solid var(--card-border); }
+    .health-table td { padding:4px 6px; border-bottom:1px solid rgba(255,255,255,0.04); white-space:nowrap; }
+    .rc-bar { display:flex; height:10px; border-radius:5px; overflow:hidden; background:rgba(255,255,255,0.06); }
+    .rc-bar span { display:block; height:100%; }
+
     /* Tables */
     .table-wrap {
       width: 100%;
@@ -579,7 +591,7 @@
       </div>
       <div class="metric-value"><span id="stat-ram-mb">31.6</span> MB</div>
       <div class="metric-footer" style="color:var(--muted-foreground);">
-        <span>Intel Celeron J4125 • 0.8% RAM</span>
+        <span title="CPU used by ctrld since the previous refresh, in % of one core (as top shows it)">CPU <b id="stat-cpu" style="color:var(--foreground);">–</b> • <span id="stat-goroutines">–</span> goroutines</span>
       </div>
     </div>
 
@@ -667,8 +679,8 @@
         <button onclick="togglePauseStream()" id="btn-pause" style="padding:5px 10px; font-size:11px;">
           <span>⏸</span> Pause
         </button>
-        <button onclick="clearTable()" style="padding:5px 10px; font-size:11px;">
-          <span>🗑</span> Clear
+        <button onclick="clearFilters()" title="Clear the search text, device and status filters (the feed is kept)" style="padding:5px 10px; font-size:11px;">
+          <span>✕</span> Clear
         </button>
         <button onclick="exportQueriesCSV()" style="padding:5px 10px; font-size:11px;">
           <span>📥</span> Export CSV
@@ -734,6 +746,39 @@
         <span id="nextdns-diag-time" style="font-size:11px; color:var(--muted-foreground);"></span>
       </div>
       <div id="nextdns-diag-body" style="font-size:12px;"></div>
+    </div>
+
+    <!-- Health (since ctrld started) -->
+    <div id="health-panel" class="card" style="margin-bottom:16px; padding:12px 14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:6px;">
+        <span style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted-foreground);">Health</span>
+        <span id="health-updated" style="font-size:11px; color:var(--muted-foreground);"></span>
+      </div>
+      <div class="health-grid">
+        <div class="health-tile"><div class="ht-label">Query health (15-min window)</div><div class="ht-value" id="h-class">–</div><div class="ht-sub" id="h-class-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">Upstream latency p50 / p95</div><div class="ht-value" id="h-lat">–</div><div class="ht-sub" id="h-lat-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">Last failover</div><div class="ht-value" id="h-failover">–</div><div class="ht-sub" id="h-failover-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">Answered locally</div><div class="ht-value" id="h-local">–</div><div class="ht-sub" id="h-local-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">Transport (answers)</div><div class="ht-value" id="h-proto" style="font-size:13px;">–</div><div class="ht-sub" id="h-proto-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">Process</div><div class="ht-value" id="h-proc" style="font-size:13px;">–</div><div class="ht-sub" id="h-proc-sub"></div></div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; margin-top:12px;">
+        <div>
+          <div class="ht-label" style="margin-bottom:6px;">Answers per upstream (since start)</div>
+          <table class="health-table">
+            <thead><tr><th>Upstream</th><th>Type</th><th style="text-align:right;">Answered</th><th style="text-align:right;">Failed</th><th style="text-align:right;">Share</th></tr></thead>
+            <tbody id="h-upstreams"></tbody>
+          </table>
+        </div>
+        <div>
+          <div class="ht-label" style="margin-bottom:6px;">Response codes (last <span id="h-rc-n">0</span> queries)</div>
+          <div id="h-rcodes" class="rc-bar"></div>
+          <div id="h-rcodes-legend" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; font-size:11px;"></div>
+          <div class="ht-label" style="margin:14px 0 6px;">Queries per minute (last hour) <span id="h-qpm-max" style="text-transform:none; font-weight:400;"></span></div>
+          <svg id="h-qpm" viewBox="0 0 300 50" preserveAspectRatio="none" style="width:100%; height:50px; display:block;"></svg>
+        </div>
+      </div>
     </div>
 
     <div id="upstreams-list">
@@ -1022,7 +1067,7 @@
     document.getElementById('tab-' + tabId).classList.add('active');
 
     if (tabId === 'config') loadConfigRaw();
-    if (tabId === 'upstreams') loadUpstreams();
+    if (tabId === 'upstreams') { loadUpstreams(); loadHealth(); }
     if (tabId === 'logs') loadSystemLogs();
   }
 
@@ -1134,11 +1179,11 @@
     }
   }
 
-  function clearTable() {
-    allEvents = [];
-    document.getElementById('feed-tbody').innerHTML = '';
-    updateTopTalkers();
-    showToast('Local history cleared');
+  // "Clear" resets the filters only; the feed history is kept.
+  function clearFilters() {
+    document.getElementById('query-search').value = '';
+    document.getElementById('dev-filter').value = 'all';
+    setStatusFilter('all'); // re-renders the table
   }
 
   async function flushCache() {
@@ -1368,6 +1413,140 @@
     }
   }
 
+  // ---- Health panel (/api/health). Polled only while the Upstream tab is open. ----
+  function fmtAgo(sec) {
+    if (sec < 60) return sec + 's ago';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm ago';
+    return Math.floor(sec / 86400) + 'd ' + Math.floor((sec % 86400) / 3600) + 'h ago';
+  }
+  function fmtClock(iso) {
+    if (!iso) return '–';
+    const d = new Date(iso);
+    return isNaN(d) ? '–' : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+  function setText(id, text, color) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerText = text;
+    if (color !== undefined) el.style.color = color;
+  }
+
+  async function loadHealth() {
+    try {
+      const res = await fetch('/api/health');
+      if (res.status === 401) { showLogin(); return; }
+      if (!res.ok) return;
+      renderHealth(await res.json());
+    } catch (e) {
+      console.warn('Health poll error:', e);
+    }
+  }
+
+  function renderHealth(h) {
+    const n = v => Number(v || 0).toLocaleString();
+    setText('health-updated', 'Updated ' + new Date().toLocaleTimeString());
+
+    // 1. Query health window
+    const hw = h.health || {};
+    const classColor = { healthy: 'var(--emerald)', degraded: 'var(--amber)', failing: 'var(--rose)' }[hw.class] || 'var(--foreground)';
+    setText('h-class', hw.class || '–', classColor);
+    setText('h-class-sub', `${n(hw.queries)} queries • ${n(hw.failed_queries)} failed • ${Math.floor((hw.elapsed_s || 0) / 60)}/${Math.round((hw.window_s || 900) / 60)} min`);
+
+    // 3. Latency percentiles
+    const lat = h.latency || {};
+    if (lat.samples > 0) {
+      setText('h-lat', `${lat.p50} / ${lat.p95} ms`, lat.p95 > 300 ? 'var(--amber)' : 'var(--foreground)');
+      setText('h-lat-sub', `last ${n(lat.samples)} upstream answers (cache excluded)`);
+    } else {
+      setText('h-lat', '–');
+      setText('h-lat-sub', 'no upstream answers in the last 500 queries');
+    }
+
+    // 1. Last failover
+    const fo = h.last_failover || {};
+    if (fo.at) {
+      setText('h-failover', fmtAgo(fo.ago_sec), fo.ago_sec < 900 ? 'var(--amber)' : 'var(--foreground)');
+      setText('h-failover-sub', `→ ${fo.to} • ${fmtClock(fo.at)}`);
+    } else {
+      setText('h-failover', 'none', 'var(--emerald)');
+      setText('h-failover-sub', 'primary answered everything since start');
+    }
+
+    // 6. Local answers
+    const lo = h.local || {};
+    const localTotal = (lo.lan || 0) + (lo.ptr || 0) + (lo.dnssd || 0);
+    setText('h-local', n(localTotal));
+    setText('h-local-sub', `LAN ${n(lo.lan)} • PTR ${n(lo.ptr)} • DNS-SD ${n(lo.dnssd)} • stale ${n(lo.stale)}`);
+
+    // 7. Transport split
+    const pr = h.protocols || {};
+    const prTotal = Object.values(pr).reduce((a, b) => a + b, 0);
+    const order = ['DOH3', 'DOH', 'UDP', 'OS'];
+    const parts = order.filter(k => pr[k] > 0).map(k => `${k} ${(100 * pr[k] / prTotal).toFixed(prTotal ? 1 : 0)}%`);
+    setText('h-proto', parts.length ? parts.join(' • ') : '–',
+      prTotal && (pr.DOH3 || 0) / prTotal < 0.95 ? 'var(--amber)' : 'var(--foreground)');
+    setText('h-proto-sub', prTotal ? `${n(prTotal)} upstream answers • ${n(h.all_failed)} with no answer` : 'no upstream answers yet');
+
+    // 8. Process
+    const pc = h.process || {};
+    setText('h-proc', 'Started ' + fmtClock(pc.started));
+    const certTxt = pc.cert_not_after ? `cert expires in ${pc.cert_days_left} d (${pc.cert_not_after})` : 'cert –';
+    setText('h-proc-sub', `config loaded ${fmtClock(pc.config_loaded)} • ${certTxt}`,
+      pc.cert_not_after && pc.cert_days_left < 30 ? 'var(--amber)' : undefined);
+
+    // 1. Upstream table
+    const tbody = document.getElementById('h-upstreams');
+    if (tbody) {
+      const ups = Array.isArray(h.upstreams) ? h.upstreams : [];
+      const total = ups.reduce((a, u) => a + (u.answered || 0), 0);
+      tbody.innerHTML = ups.map(u => {
+        const share = total ? (100 * u.answered / total).toFixed(1) + '%' : '–';
+        const failColor = u.failed > 0 ? 'var(--amber)' : 'var(--muted-foreground)';
+        return `<tr>
+          <td class="cell-clip" style="max-width:190px;" title="${esc(u.name)}">${esc(u.name)}</td>
+          <td style="font-family:ui-monospace, monospace; font-size:11px;">${esc(u.type)}</td>
+          <td style="text-align:right;">${n(u.answered)}</td>
+          <td style="text-align:right; color:${failColor};">${n(u.failed)}</td>
+          <td style="text-align:right;">${share}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="5" style="color:var(--muted-foreground);">No upstream answers yet</td></tr>';
+    }
+
+    // 4. Response codes
+    const rc = h.rcodes || {};
+    const rcTotal = h.rcode_samples || 0;
+    setText('h-rc-n', n(rcTotal));
+    const rcColors = { NOERROR: '#22c55e', NXDOMAIN: '#60a5fa', SERVFAIL: '#ef4444', REFUSED: '#f97316', NO_ANSWER: '#a855f7' };
+    const rcKeys = Object.keys(rc).sort((a, b) => rc[b] - rc[a]);
+    const bar = document.getElementById('h-rcodes');
+    const legend = document.getElementById('h-rcodes-legend');
+    if (bar && legend) {
+      bar.innerHTML = rcKeys.map(k => `<span style="width:${(100 * rc[k] / rcTotal).toFixed(2)}%; background:${rcColors[k] || '#9ca3af'};" title="${esc(k)}"></span>`).join('');
+      legend.innerHTML = rcKeys.map(k => {
+        const pct = (100 * rc[k] / rcTotal).toFixed(1);
+        const warn = k === 'SERVFAIL' && rc[k] / rcTotal > 0.01;
+        return `<span style="${warn ? 'color:var(--rose); font-weight:700;' : 'color:var(--muted-foreground);'}"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:${rcColors[k] || '#9ca3af'}; margin-right:4px;"></span>${esc(k)} ${pct}% (${n(rc[k])})</span>`;
+      }).join('');
+    }
+
+    // 5. Queries per minute sparkline (oldest → newest; last bar is the minute in progress)
+    const qpm = Array.isArray(h.per_minute) ? h.per_minute : [];
+    const svg = document.getElementById('h-qpm');
+    if (svg && qpm.length) {
+      const max = Math.max(1, ...qpm);
+      const w = 300 / qpm.length;
+      svg.innerHTML = qpm.map((v, i) => {
+        const bh = Math.max(v > 0 ? 1.5 : 0, 48 * v / max);
+        const fill = i === qpm.length - 1 ? 'rgba(96,165,250,0.45)' : '#60a5fa';
+        return `<rect x="${(i * w + 0.5).toFixed(2)}" y="${(50 - bh).toFixed(2)}" width="${Math.max(0.5, w - 1).toFixed(2)}" height="${bh.toFixed(2)}" fill="${fill}"><title>${v} queries, ${qpm.length - 1 - i} min ago</title></rect>`;
+      }).join('');
+      const done = qpm.slice(0, -1);
+      const avg = done.length ? Math.round(done.reduce((a, b) => a + b, 0) / done.length) : 0;
+      setText('h-qpm-max', `— peak ${max.toLocaleString()}/min • avg ${avg.toLocaleString()}/min`);
+    }
+  }
+
   async function loadDevices() {
     const sel = document.getElementById('dev-filter');
     if (!sel) return;
@@ -1407,6 +1586,13 @@
       if (data.pid) document.getElementById('stat-pid').innerText = 'PID ' + data.pid;
       if (data.uptime_str) document.getElementById('stat-uptime').innerText = data.uptime_str;
       if (data.mem_rss_mb) document.getElementById('stat-ram-mb').innerText = data.mem_rss_mb.toFixed(1);
+      if (typeof data.cpu_pct === 'number') {
+        const cpuEl = document.getElementById('stat-cpu');
+        cpuEl.innerText = data.cpu_pct < 0 ? 'n/a' : data.cpu_pct.toFixed(1) + '%';
+        // The NDP busy-loop bug of v1.5.7 showed as ~100% of one core.
+        cpuEl.style.color = data.cpu_pct >= 50 ? 'var(--rose)' : data.cpu_pct >= 15 ? 'var(--amber)' : 'var(--foreground)';
+      }
+      if (data.num_goroutine) document.getElementById('stat-goroutines').innerText = data.num_goroutine;
       if (data.cache_items !== undefined) document.getElementById('stat-cache-items').innerText = data.cache_items;
       if (data.cache_size) document.getElementById('stat-cache-size').innerText = 'Size: ' + data.cache_size;
       if (data.queries) {
@@ -1793,6 +1979,10 @@
   // Init
   checkAuthAndInit();
   setInterval(refreshStatus, 4000);
+  setInterval(() => {
+    const view = document.getElementById('view-upstreams');
+    if (view && view.classList.contains('active') && !document.hidden) loadHealth();
+  }, 5000);
   setInterval(loadDevices, 15000);
 
   const tomlTextarea = document.getElementById('toml-editor');

@@ -296,6 +296,7 @@ func (p *prog) serveDNS(listenerNum string) error {
 			})
 			if pr.drop {
 				p.health.countQuery()
+				p.dnsStats.countQuery(time.Now())
 				return
 			}
 			go p.doSelfUninstall(pr.answer)
@@ -316,6 +317,7 @@ func (p *prog) serveDNS(listenerNum string) error {
 		labelValues = append(labelValues, dns.RcodeToString[answer.Rcode])
 		// The grade of the window must not depend on the goroutine below.
 		p.health.countQuery()
+		p.dnsStats.countQuery(time.Now())
 		// The Web UI event is built from a copy, because w.WriteMsg below packs the
 		// same message concurrently. Nothing is copied while the Web UI is off.
 		webActive := p.webActive.Load()
@@ -853,6 +855,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 		}
 		if req.ufr.matchedRule == noRuleMatched {
 			if answer := p.privateReverseNonAddressAnswer(ctx, req.msg); answer != nil {
+				p.dnsStats.countLocalDNSSD()
 				res.answer = answer
 				res.clientInfo = true
 				return res
@@ -863,6 +866,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 			case isPrivatePtrLookup(req.msg):
 				isLanOrPtrQuery = true
 				if answer := p.proxyPrivatePtrLookup(ctx, req.msg); answer != nil {
+					p.dnsStats.countLocalPTR()
 					res.answer = answer
 					res.clientInfo = true
 					return res
@@ -870,6 +874,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 			case p.isLanHostnameQuery(req.msg):
 				isLanOrPtrQuery = true
 				if answer := p.proxyLanHostnameQuery(ctx, req.msg); answer != nil {
+					p.dnsStats.countLocalLAN()
 					res.answer = answer
 					res.clientInfo = true
 					return res
@@ -884,6 +889,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 			// "no explicit policy matched" default.
 			ctrld.Log(ctx, mainLog.Load().Debug(), "%s, %s -> %v", req.ufr.matchedPolicy, req.ufr.matchedRule, upstreams)
 		case isPrivateReverseNonAddress(req.msg):
+			p.dnsStats.countLocalDNSSD()
 			res.answer = p.privateReverseNonAddressAnswer(ctx, req.msg)
 			res.clientInfo = true
 			return res
@@ -895,6 +901,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 		case isPrivatePtrLookup(req.msg):
 			isLanOrPtrQuery = true
 			if answer := p.proxyPrivatePtrLookup(ctx, req.msg); answer != nil {
+				p.dnsStats.countLocalPTR()
 				res.answer = answer
 				res.clientInfo = true
 				return res
@@ -905,6 +912,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 		case p.isLanHostnameQuery(req.msg):
 			isLanOrPtrQuery = true
 			if answer := p.proxyLanHostnameQuery(ctx, req.msg); answer != nil {
+				p.dnsStats.countLocalLAN()
 				res.answer = answer
 				res.clientInfo = true
 				return res
@@ -1157,6 +1165,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 		// increase failure count when there is no answer
 		// rehardless of what kind of error we get
 		p.um.increaseFailureCount(upstream)
+		p.dnsStats.countUpstreamFailure(upstream)
 
 		if err != nil {
 			// For timeout error (i.e: context deadline exceed), force re-bootstrapping.
@@ -1213,6 +1222,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 					if !staleExpire.IsZero() && time.Since(staleExpire) <= maxStaleAge {
 						ctrld.Log(ctx, mainLog.Load().Debug(), "serving stale cached response")
 						p.health.countCacheHit()
+						p.dnsStats.countStale()
 						now := time.Now()
 						setCachedAnswerTTL(staleAnswer, now, now.Add(staleTTL))
 						res.answer = staleAnswer
@@ -1293,6 +1303,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 				ctrld.Log(ctx, mainLog.Load().Debug(), "dns64: add cached response variant")
 			}
 			ctrld.Log(ctx, mainLog.Load().Info(), "REPLY: %s -> %s (%s): %s", upstreams[n], req.ufr.srcAddr, hostname, dns.RcodeToString[answer.Rcode])
+			p.dnsStats.countAnswer(upstreams, n, time.Now())
 			res.answer = answer
 			res.upstream = upstreamConfig.Endpoint
 			return res
@@ -1341,6 +1352,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 		}
 	}
 	ctrld.Log(ctx, p.querySampler.event(sampleClassAllEndpointsFailed, ""), "all %v endpoints failed", journalUpstreamNames(upstreams))
+	p.dnsStats.countAllFailed()
 	// The OS resolver failed this query, as the only upstream or as the
 	// catch-all below.
 	osResolverFailed := len(upstreams) > 0 && upstreams[0] == upstreamOS
@@ -1387,6 +1399,7 @@ func (p *prog) proxy(ctx context.Context, req *proxyRequest) *proxyResponse {
 			answer := resolve(upstreamOS, osUpstreamConfig, req.msg)
 			if answer != nil {
 				ctrld.Log(ctx, mainLog.Load().Debug(), "OS resolver retry query successful")
+				p.dnsStats.countOSRetryAnswer(time.Now())
 				res.answer = answer
 				res.upstream = osUpstreamConfig.Endpoint
 				return res

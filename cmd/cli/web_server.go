@@ -949,6 +949,7 @@ func (ws *webServer) registerRoutes() {
 			Status      string  `json:"status"`
 			Role        string  `json:"role"`
 			Latency     float64 `json:"latency"`
+			IsProbed    bool    `json:"is_probed"`
 		}
 		var list []UpstreamInfo
 		if ws.p.cfg != nil {
@@ -980,6 +981,13 @@ func (ws *webServer) registerRoutes() {
 					role = "ISP Fallback"
 				}
 				lat := math.Round(ws.p.getUpstreamLatency(k)*10) / 10
+				isProbed := false
+				if lat == 0 {
+					if pLat, _ := getProbedLatency(k); pLat > 0 {
+						lat = pLat
+						isProbed = true
+					}
+				}
 				list = append(list, UpstreamInfo{
 					ID:          k,
 					Index:       n + 1,
@@ -991,6 +999,7 @@ func (ws *webServer) registerRoutes() {
 					Status:      status,
 					Role:        role,
 					Latency:     lat,
+					IsProbed:    isProbed,
 				})
 			}
 		}
@@ -1440,6 +1449,7 @@ func (p *prog) runWebUI(ctx context.Context, reloadCh chan struct{}) {
 		mainLog.Load().Error().Err(err).Msg("failed to start Web UI server")
 		return
 	}
+	p.startStandbyProber(ctx)
 	// Record DNS events only while the Web UI is serving, so a disabled UI costs
 	// nothing on the DNS path.
 	p.webActive.Store(true)
@@ -1542,4 +1552,96 @@ func getProcessRSSMB() float64 {
 	pageSize := int64(os.Getpagesize())
 	bytes := residentPages * pageSize
 	return float64(bytes) / (1024 * 1024)
+}
+
+var (
+	probedLatencyMu sync.RWMutex
+	probedLatency   = make(map[string]float64)
+	probedAt        = make(map[string]time.Time)
+)
+
+func getProbedLatency(k string) (float64, time.Time) {
+	probedLatencyMu.RLock()
+	defer probedLatencyMu.RUnlock()
+	return probedLatency[k], probedAt[k]
+}
+
+func setProbedLatency(k string, lat float64, at time.Time) {
+	probedLatencyMu.Lock()
+	defer probedLatencyMu.Unlock()
+	probedLatency[k] = lat
+	probedAt[k] = at
+}
+
+// probeStandbyUpstream sends a lightweight test DNS query (example.com, Type A)
+// directly to uc using newResolverFn to measure real round-trip latency.
+func probeStandbyUpstream(ctx context.Context, uc *ctrld.UpstreamConfig) (float64, error) {
+	if uc == nil {
+		return 0, fmt.Errorf("nil upstream config")
+	}
+	resolver, err := newResolverFn(uc)
+	if err != nil {
+		return 0, err
+	}
+	m := new(dns.Msg)
+	m.SetQuestion("example.com.", dns.TypeA)
+	probeCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	ans, err := resolver.Resolve(probeCtx, m)
+	elapsed := time.Since(start)
+	if err != nil {
+		return 0, err
+	}
+	if ans == nil {
+		return 0, fmt.Errorf("empty answer")
+	}
+	lat := math.Round(float64(elapsed.Microseconds())/100.0) / 10.0 // 1 decimal ms
+	return lat, nil
+}
+
+// startStandbyProber starts a background loop that samples standby upstreams once an hour.
+func (p *prog) startStandbyProber(ctx context.Context) {
+	go func() {
+		// Run first probe after 5s to avoid competing with service startup
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+
+		runProbe := func() {
+			if p == nil || p.cfg == nil {
+				return
+			}
+			activeKey := p.getActiveUpstreamKey()
+			for k, uc := range p.cfg.Upstream {
+				if uc == nil {
+					continue
+				}
+				// If this upstream already has live traffic latency from ring buffer, skip probe
+				if k == activeKey && p.getUpstreamLatency(k) > 0 {
+					continue
+				}
+				lat, err := probeStandbyUpstream(ctx, uc)
+				if err == nil && lat > 0 {
+					setProbedLatency(k, lat, time.Now())
+				}
+			}
+		}
+
+		runProbe()
+
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runProbe()
+			}
+		}
+	}()
 }

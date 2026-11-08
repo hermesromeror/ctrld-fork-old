@@ -1442,7 +1442,14 @@
         }
 
         const epDisplay = u.endpoint + (u.bootstrap_ip ? ` • IP: ${u.bootstrap_ip}` : '');
-        const rightText = isPrimary ? `<span style="font-weight:700; color:var(--emerald);">${esc(u.latency)} ms</span>` : `<span style="font-size:11px; color:var(--muted-foreground);">${esc(u.timeout)} ms t/o</span>`;
+        let rightText = '';
+        if (isPrimary) {
+          rightText = `<span style="font-weight:700; color:var(--emerald);">${esc(u.latency)} ms</span>`;
+        } else if (u.latency > 0) {
+          rightText = `<div style="text-align:right;"><span style="font-weight:700; color:var(--foreground);">${esc(u.latency)} ms</span><span style="font-size:10px; color:var(--muted-foreground); display:block;">hourly probe</span></div>`;
+        } else {
+          rightText = `<span style="font-size:11px; color:var(--muted-foreground);">${esc(u.timeout)} ms t/o</span>`;
+        }
 
         card.innerHTML = `
           <div style="display:flex; align-items:center; gap:12px;">

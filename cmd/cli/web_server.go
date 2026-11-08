@@ -198,6 +198,52 @@ type webServer struct {
 	cpuMu       sync.Mutex
 	lastCPU     time.Duration
 	lastCPUWall time.Time
+
+	// aliasesMu guards reading/writing device_aliases.json.
+	aliasesMu sync.Mutex
+}
+
+func (ws *webServer) deviceAliasesPath() string {
+	if homedir != "" {
+		return filepath.Join(homedir, "device_aliases.json")
+	}
+	if configPath != "" {
+		return filepath.Join(filepath.Dir(configPath), "device_aliases.json")
+	}
+	if ws.certDir != "" {
+		if filepath.Base(ws.certDir) == "web" {
+			return filepath.Join(filepath.Dir(ws.certDir), "device_aliases.json")
+		}
+		return filepath.Join(ws.certDir, "device_aliases.json")
+	}
+	return "/data/controld/device_aliases.json"
+}
+
+func (ws *webServer) loadDeviceAliases() map[string]string {
+	ws.aliasesMu.Lock()
+	defer ws.aliasesMu.Unlock()
+	res := make(map[string]string)
+	p := ws.deviceAliasesPath()
+	data, err := os.ReadFile(p)
+	if err == nil {
+		_ = json.Unmarshal(data, &res)
+	}
+	return res
+}
+
+func (ws *webServer) saveDeviceAliases(aliases map[string]string) error {
+	ws.aliasesMu.Lock()
+	defer ws.aliasesMu.Unlock()
+	p := ws.deviceAliasesPath()
+	data, err := json.MarshalIndent(aliases, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
 }
 
 func (p *prog) webUIEnabled() bool {
@@ -978,6 +1024,14 @@ func (ws *webServer) registerRoutes() {
 			IP   string `json:"ip"`
 			Name string `json:"name"`
 		}
+		// Prioritize custom user-defined aliases over discovered names
+		aliases := ws.loadDeviceAliases()
+		for ip, alias := range aliases {
+			if alias != "" {
+				devMap[ip] = alias
+			}
+		}
+
 		var list []DevInfo
 		for ip, name := range devMap {
 			list = append(list, DevInfo{IP: ip, Name: name})
@@ -995,6 +1049,52 @@ func (ws *webServer) registerRoutes() {
 			list = []DevInfo{}
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	})
+
+	// GET & POST /api/devices/aliases
+	ws.mux.HandleFunc("/api/devices/aliases", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(ws.loadDeviceAliases())
+			return
+		}
+		if r.Method == http.MethodPost {
+			var body struct {
+				IP    string `json:"ip"`
+				Alias string `json:"alias"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, `{"status":"error","message":"Invalid JSON"}`, http.StatusBadRequest)
+				return
+			}
+			ip := strings.TrimSpace(body.IP)
+			alias := strings.TrimSpace(body.Alias)
+			if net.ParseIP(ip) == nil {
+				http.Error(w, `{"status":"error","message":"Invalid IP address"}`, http.StatusBadRequest)
+				return
+			}
+			if len(alias) > 40 {
+				alias = alias[:40]
+			}
+			aliases := ws.loadDeviceAliases()
+			if alias == "" {
+				delete(aliases, ip)
+			} else {
+				aliases[ip] = alias
+			}
+			if err := ws.saveDeviceAliases(aliases); err != nil {
+				http.Error(w, `{"status":"error","message":"Could not save alias"}`, http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":  "ok",
+				"message": "Device alias saved",
+				"ip":      ip,
+				"alias":   alias,
+			})
+			return
+		}
+		http.Error(w, `{"status":"error","message":"Method not allowed"}`, http.StatusMethodNotAllowed)
 	})
 
 	// POST /api/config-save

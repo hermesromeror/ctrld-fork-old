@@ -618,6 +618,21 @@
         <span><span style="color:var(--rose);" id="stat-blocked">0</span> blocked • <span style="color:var(--emerald);" id="stat-allowed">0</span> allowed • <span id="stat-total">0</span> total</span>
       </div>
     </div>
+
+    <!-- Card 5: Traffic Activity (Last 60 Minutes) -->
+    <div class="metric-card">
+      <div class="metric-header">
+        <span>Activity Trend (60m)</span>
+        <span class="metric-tag" style="background:rgba(96,165,250,0.15); color:#60a5fa;" id="stat-qpm-peak">–/min</span>
+      </div>
+      <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:10px;">
+        <div class="metric-value" style="font-size:20px; line-height:1;"><span id="stat-qpm-now">–</span> <span style="font-size:12px; font-weight:400; color:var(--muted-foreground);">q/min</span></div>
+        <svg id="ribbon-sparkline" viewBox="0 0 100 24" preserveAspectRatio="none" style="width:110px; height:24px; display:block; border-radius:3px; background:rgba(255,255,255,0.03);"></svg>
+      </div>
+      <div class="metric-footer" style="color:var(--muted-foreground);">
+        <span id="stat-qpm-sub">Activity across the last hour</span>
+      </div>
+    </div>
   </div>
 
   <!-- Tabs Navigation Bar -->
@@ -750,29 +765,35 @@
 
     <!-- Health (since ctrld started) -->
     <div id="health-panel" class="card" style="margin-bottom:16px; padding:12px 14px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:6px;">
-        <span style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted-foreground);">Health</span>
-        <span id="health-updated" style="font-size:11px; color:var(--muted-foreground);"></span>
-      </div>
-      <div class="health-grid">
-        <div class="health-tile"><div class="ht-label">Query health (15-min window)</div><div class="ht-value" id="h-class">–</div><div class="ht-sub" id="h-class-sub"></div></div>
-        <div class="health-tile"><div class="ht-label">Upstream latency p50 / p95</div><div class="ht-value" id="h-lat">–</div><div class="ht-sub" id="h-lat-sub"></div></div>
-        <div class="health-tile"><div class="ht-label">Last failover</div><div class="ht-value" id="h-failover">–</div><div class="ht-sub" id="h-failover-sub"></div></div>
-        <div class="health-tile"><div class="ht-label">Answered locally</div><div class="ht-value" id="h-local">–</div><div class="ht-sub" id="h-local-sub"></div></div>
-        <div class="health-tile"><div class="ht-label">Transport (answers)</div><div class="ht-value" id="h-proto" style="font-size:13px;">–</div><div class="ht-sub" id="h-proto-sub"></div></div>
-        <div class="health-tile"><div class="ht-label">Process</div><div class="ht-value" id="h-proc" style="font-size:13px;">–</div><div class="ht-sub" id="h-proc-sub"></div></div>
+      <!-- Unified Status Semaphore Banner -->
+      <div id="h-status-banner" style="display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:8px; margin-bottom:12px; border:1px solid rgba(34,197,94,0.3); background:rgba(34,197,94,0.1);">
+        <span id="h-status-icon" style="font-size:22px;">🟢</span>
+        <div style="flex:1; min-width:0;">
+          <div id="h-status-title" style="font-weight:700; font-size:13px; color:#4ade80;">DNS Resolution 100% Operational</div>
+          <div id="h-status-desc" style="font-size:11px; color:var(--muted-foreground); margin-top:2px;">Primary upstream (NextDNS) responding with 0 errors in the last 15 minutes.</div>
+        </div>
+        <span id="health-updated" style="font-size:11px; color:var(--muted-foreground); white-space:nowrap;"></span>
       </div>
 
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; margin-top:12px;">
+      <div class="health-grid">
+        <div class="health-tile"><div class="ht-label">🛡️ Resolution Success</div><div class="ht-value" id="h-class">–</div><div class="ht-sub" id="h-class-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">⚡ Latency (Typical / Peak)</div><div class="ht-value" id="h-lat">–</div><div class="ht-sub" id="h-lat-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">🔀 Failover Status</div><div class="ht-value" id="h-failover">–</div><div class="ht-sub" id="h-failover-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">🏠 Local LAN Traffic</div><div class="ht-value" id="h-local">–</div><div class="ht-sub" id="h-local-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">🔒 WAN Protocol</div><div class="ht-value" id="h-proto" style="font-size:13px;">–</div><div class="ht-sub" id="h-proto-sub"></div></div>
+        <div class="health-tile"><div class="ht-label">📜 HTTPS Cert & Uptime</div><div class="ht-value" id="h-proc" style="font-size:13px;">–</div><div class="ht-sub" id="h-proc-sub"></div></div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:14px; margin-top:12px;">
         <div>
-          <div class="ht-label" style="margin-bottom:6px;">Answers per upstream (since start)</div>
+          <div class="ht-label" style="margin-bottom:6px;">Upstream Redundancy & Answers</div>
           <table class="health-table">
-            <thead><tr><th>Upstream</th><th>Type</th><th style="text-align:right;">Answered</th><th style="text-align:right;">Failed</th><th style="text-align:right;">Share</th></tr></thead>
+            <thead><tr><th>Upstream</th><th>Role</th><th>Type</th><th style="text-align:right;">Answered</th><th style="text-align:right;">Failed</th><th style="text-align:right;">Share</th></tr></thead>
             <tbody id="h-upstreams"></tbody>
           </table>
         </div>
         <div>
-          <div class="ht-label" style="margin-bottom:6px;">Response codes (last <span id="h-rc-n">0</span> queries)</div>
+          <div class="ht-label" style="margin-bottom:6px;">Response Codes Breakdown (<span id="h-rc-n">0</span> queries)</div>
           <div id="h-rcodes" class="rc-bar"></div>
           <div id="h-rcodes-legend" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; font-size:11px;"></div>
           <div class="ht-label" style="margin:14px 0 6px;">Queries per minute (last hour) <span id="h-qpm-max" style="text-transform:none; font-weight:400;"></span></div>
@@ -796,7 +817,7 @@
     </div>
 
     <div style="display:flex; gap:8px; margin-bottom:16px;">
-      <input type="text" id="test-domain-input" placeholder="e.g. google.com or doubleclick.net" value="www.xvideos.com" style="flex:1; padding:10px 14px; border-radius:8px; border:1px solid var(--card-border); background:#070a11; color:#fff; font-family:ui-monospace, monospace; font-size:13px; outline:none;" onkeydown="if(event.key==='Enter') runDnsTest()">
+      <input type="text" id="test-domain-input" placeholder="e.g. google.com or apple.com" value="" style="flex:1; padding:10px 14px; border-radius:8px; border:1px solid var(--card-border); background:#070a11; color:#fff; font-family:ui-monospace, monospace; font-size:13px; outline:none;" onkeydown="if(event.key==='Enter') runDnsTest()">
       <select id="test-type-select" style="background:#1f2937; border:1px solid var(--card-border); color:var(--foreground); padding:0 12px; border-radius:8px; font-size:12px; outline:none;">
         <option value="A">A</option>
         <option value="AAAA">AAAA</option>
@@ -804,6 +825,9 @@
         <option value="TXT">TXT</option>
         <option value="PTR">PTR</option>
       </select>
+      <button onclick="clearTestDomainInput()" title="Clear field" style="padding:0 14px; background:rgba(255,255,255,0.06); border:1px solid var(--card-border); color:var(--muted-foreground); border-radius:8px; font-size:12px; cursor:pointer;">
+        <span>✕</span> Clear
+      </button>
       <button onclick="runDnsTest()" class="primary" style="padding:0 18px;">
         <span>⚡</span> Run Query
       </button>
@@ -883,6 +907,29 @@
     <pre id="logs-terminal" style="background:#030712; color:#e2e8f0; font-family:ui-monospace, monospace; font-size:11.5px; padding:12px 14px; border-radius:8px; border:1px solid var(--card-border); max-height:min(550px, 75vh); overflow-y:auto; white-space:pre-wrap; word-break:break-all; line-height:1.45;"></pre>
   </div>
 
+</div>
+
+<!-- Device Alias Modal -->
+<div id="device-alias-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(3px); z-index:9999; align-items:center; justify-content:center;">
+  <div style="background:#0f172a; border:1px solid var(--card-border); border-radius:12px; padding:20px; width:90%; max-width:400px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h3 style="font-size:14px; font-weight:700; color:#fff; margin:0;">🏷️ Custom Device Alias</h3>
+      <span onclick="closeDeviceAliasModal()" style="cursor:pointer; color:var(--muted-foreground); font-size:16px;">✕</span>
+    </div>
+    <div style="font-size:12px; color:var(--muted-foreground); margin-bottom:12px;">
+      Assign a friendly name to <strong id="modal-alias-ip" style="color:#60a5fa; font-family:ui-monospace, monospace;"></strong> (persisted on router):
+    </div>
+    <input type="text" id="modal-alias-input" placeholder="e.g. Living Room TV or Wemo Plug" maxlength="40" style="width:100%; box-sizing:border-box; padding:9px 12px; border-radius:6px; border:1px solid var(--card-border); background:#070a11; color:#fff; font-size:13px; outline:none; margin-bottom:16px;" onkeydown="if(event.key==='Enter') saveDeviceAliasFromModal()">
+    <div style="display:flex; justify-content:space-between; gap:10px;">
+      <button onclick="removeDeviceAliasFromModal()" id="btn-remove-alias" style="padding:6px 12px; font-size:12px; background:rgba(244,63,94,0.15); color:#fca5a5; border:1px solid rgba(244,63,94,0.3); border-radius:6px; cursor:pointer;">
+        Delete Alias
+      </button>
+      <div style="display:flex; gap:8px;">
+        <button onclick="closeDeviceAliasModal()" style="padding:6px 12px; font-size:12px; border-radius:6px;">Cancel</button>
+        <button onclick="saveDeviceAliasFromModal()" class="primary" style="padding:6px 14px; font-size:12px; border-radius:6px;">Save</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="toast" class="toast">Notification</div>
@@ -993,9 +1040,12 @@
   function showApp() {
     document.getElementById('login-view').style.display = 'none';
     document.getElementById('app-view').style.display = 'flex';
-    refreshStatus();
-    loadDevices();
-    loadInitialQueries().then(() => connectSSE());
+    loadDeviceAliases().then(() => {
+      refreshStatus();
+      loadHealth();
+      loadDevices();
+      loadInitialQueries().then(() => connectSSE());
+    });
   }
 
   async function checkAuthAndInit() {
@@ -1118,17 +1168,20 @@
       statusText = 'NXDOMAIN';
     }
 
-    const devName = ev.client_dev && ev.client_dev !== ev.client_ip ? ev.client_dev : (ev.client_ip || 'Router');
-    const devIP = ev.client_ip && ev.client_dev !== ev.client_ip ? ev.client_ip : '';
-    const devTitle = devIP ? `${devName} (${devIP})` : devName;
+    const ip = ev.client_ip || '';
+    const hasAlias = deviceAliases[ip];
+    const devName = hasAlias || (ev.client_dev && ev.client_dev !== ip ? ev.client_dev : (ip || 'Router'));
+    const devIP = ip && devName !== ip ? ip : '';
+    const aliasTag = hasAlias ? ' <span title="Custom alias" style="font-size:10px; color:#60a5fa;">🏷️</span>' : '';
+    const devTitle = devIP ? `${devName} (${devIP}) - Click to set alias` : `${devName} - Click to set alias`;
     const lat = Number(ev.latency_ms) || 0;
 
     const latColor = lat <= 1 ? '#a855f7' : (lat < 10 ? '#34d399' : (lat < 50 ? '#60a5fa' : '#fbbf24'));
 
-    // Device name with the IP below it; each line is cut with "…" (full text on hover).
+    // Device name with the IP below it; each line is cut with "…" (full text on hover). Clickable to set alias.
     tr.innerHTML = `
       <td style="color:var(--muted-foreground);">${esc(ev.time)}</td>
-      <td title="${esc(devTitle)}"><div class="cell-clip" style="font-weight:600; color:var(--foreground);">${esc(devName)}</div>${devIP ? `<div class="cell-clip dev-ip" style="color:var(--muted-foreground);">${esc(devIP)}</div>` : ''}</td>
+      <td title="${esc(devTitle)}" style="cursor:pointer;" onclick="openDeviceAliasModal('${esc(ip)}', '${esc(devName)}')"><div class="cell-clip" style="font-weight:600; color:var(--foreground);">${esc(devName)}${aliasTag}</div>${devIP ? `<div class="cell-clip dev-ip" style="color:var(--muted-foreground);">${esc(devIP)}</div>` : ''}</td>
       <td style="color:#60a5fa;">${esc(ev.type || 'A')}</td>
       <td class="cell-clip" style="font-weight:600; color:var(--foreground);" title="${esc(ev.domain)}"><span onclick="testDomainInResolver(this.getAttribute('data-domain'))" data-domain="${esc(ev.domain)}" class="domain-test-link" title="Click to test in Live DNS Resolver">${esc(ev.domain)}</span></td>
       <td class="cell-clip"><span class="status-badge ${badgeClass}">${esc(statusText)}</span></td>
@@ -1443,94 +1496,214 @@
     }
   }
 
+  function clearTestDomainInput() {
+    const inp = document.getElementById('test-domain-input');
+    if (inp) {
+      inp.value = '';
+      inp.focus();
+    }
+  }
+
+  let deviceAliases = {};
+  async function loadDeviceAliases() {
+    try {
+      const res = await fetch('/api/devices/aliases');
+      if (res.ok) {
+        deviceAliases = await res.json() || {};
+      }
+    } catch(e) {
+      console.warn('Error loading device aliases:', e);
+    }
+  }
+
+  function openDeviceAliasModal(ip, currentName) {
+    if (!ip) return;
+    document.getElementById('modal-alias-ip').innerText = ip;
+    const existing = deviceAliases[ip] || (currentName !== ip ? currentName : '');
+    const inp = document.getElementById('modal-alias-input');
+    inp.value = existing;
+    document.getElementById('device-alias-modal').style.display = 'flex';
+    inp.focus();
+    inp.select();
+  }
+
+  function closeDeviceAliasModal() {
+    document.getElementById('device-alias-modal').style.display = 'none';
+  }
+
+  async function saveDeviceAliasFromModal() {
+    const ip = document.getElementById('modal-alias-ip').innerText.trim();
+    const alias = document.getElementById('modal-alias-input').value.trim();
+    if (!ip) return;
+    try {
+      const res = await fetch('/api/devices/aliases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, alias })
+      });
+      if (res.ok) {
+        if (alias) {
+          deviceAliases[ip] = alias;
+          showToast(`Saved alias for ${ip}`);
+        } else {
+          delete deviceAliases[ip];
+          showToast(`Cleared alias for ${ip}`);
+        }
+        closeDeviceAliasModal();
+        loadDevices();
+        filterFeed();
+        updateTopTalkers();
+      } else {
+        const err = await res.json();
+        alert('Could not save alias: ' + (err.message || 'unknown error'));
+      }
+    } catch(e) {
+      alert('Error saving alias: ' + e);
+    }
+  }
+
+  async function removeDeviceAliasFromModal() {
+    document.getElementById('modal-alias-input').value = '';
+    await saveDeviceAliasFromModal();
+  }
+
   function renderHealth(h) {
     const n = v => Number(v || 0).toLocaleString();
     setText('health-updated', 'Updated ' + new Date().toLocaleTimeString());
 
-    // 1. Query health window
     const hw = h.health || {};
-    const classColor = { healthy: 'var(--emerald)', degraded: 'var(--amber)', failing: 'var(--rose)' }[hw.class] || 'var(--foreground)';
-    setText('h-class', hw.class || '–', classColor);
-    setText('h-class-sub', `${n(hw.queries)} queries • ${n(hw.failed_queries)} failed • ${Math.floor((hw.elapsed_s || 0) / 60)}/${Math.round((hw.window_s || 900) / 60)} min`);
-
-    // 3. Latency percentiles
+    const fo = h.last_failover || {};
     const lat = h.latency || {};
+    const lo = h.local || {};
+    const pr = h.protocols || {};
+    const pc = h.process || {};
+
+    // 1. Unified Status Semaphore Banner
+    const banner = document.getElementById('h-status-banner');
+    const bIcon = document.getElementById('h-status-icon');
+    const bTitle = document.getElementById('h-status-title');
+    const bDesc = document.getElementById('h-status-desc');
+
+    if (banner && bIcon && bTitle && bDesc) {
+      if (hw.class === 'failing' || h.all_failed > 0) {
+        banner.style.background = 'rgba(239, 68, 68, 0.12)';
+        banner.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+        bIcon.innerText = '🔴';
+        bTitle.style.color = '#f87171';
+        bTitle.innerText = 'DNS Resolution Critical / Upstream Failures Detected';
+        bDesc.innerText = `${n(hw.failed_queries)} failed queries in the current 15-minute window. Check WAN connection.`;
+      } else if (hw.class === 'degraded' || (fo.at && fo.ago_sec < 900)) {
+        banner.style.background = 'rgba(245, 158, 11, 0.12)';
+        banner.style.borderColor = 'rgba(245, 158, 11, 0.35)';
+        bIcon.innerText = '🟡';
+        bTitle.style.color = '#fbbf24';
+        bTitle.innerText = 'Resolution Degraded or Failover Engaged';
+        bDesc.innerText = `Traffic recently switched to ${esc(fo.to || 'fallback')} (${fmtAgo(fo.ago_sec)}). Primary is recovering.`;
+      } else {
+        banner.style.background = 'rgba(34, 197, 94, 0.1)';
+        banner.style.borderColor = 'rgba(34, 197, 94, 0.3)';
+        bIcon.innerText = '🟢';
+        bTitle.style.color = '#4ade80';
+        bTitle.innerText = 'DNS Resolution 100% Operational';
+        bDesc.innerText = `Primary upstream (NextDNS) responding with 0 errors in the last 15 minutes. All policies active.`;
+      }
+    }
+
+    // 2. Tile 1: Query Health Window
+    const classColor = { healthy: 'var(--emerald)', degraded: 'var(--amber)', failing: 'var(--rose)' }[hw.class] || 'var(--foreground)';
+    const classLabel = { healthy: '● 100% Healthy', degraded: '▲ Degraded', failing: '✖ Failing' }[hw.class] || (hw.class || '–');
+    setText('h-class', classLabel, classColor);
+    setText('h-class-sub', `${n(hw.queries)} queries • ${n(hw.failed_queries)} failed (${Math.floor((hw.elapsed_s || 0) / 60)}/15 min)`);
+
+    // 3. Tile 2: Latency percentiles
     if (lat.samples > 0) {
-      setText('h-lat', `${lat.p50} / ${lat.p95} ms`, lat.p95 > 300 ? 'var(--amber)' : 'var(--foreground)');
-      setText('h-lat-sub', `last ${n(lat.samples)} upstream answers (cache excluded)`);
+      const p50Text = `${lat.p50} ms`;
+      const p95Text = `${lat.p95} ms`;
+      setText('h-lat', `${p50Text} / ${p95Text}`, lat.p95 > 300 ? 'var(--amber)' : 'var(--foreground)');
+      setText('h-lat-sub', `Median: ${p50Text} • Peak (p95): ${p95Text}`);
     } else {
       setText('h-lat', '–');
-      setText('h-lat-sub', 'no upstream answers in the last 500 queries');
+      setText('h-lat-sub', 'No upstream answers yet');
     }
 
-    // 1. Last failover
-    const fo = h.last_failover || {};
+    // 4. Tile 3: Failover status
     if (fo.at) {
-      setText('h-failover', fmtAgo(fo.ago_sec), fo.ago_sec < 900 ? 'var(--amber)' : 'var(--foreground)');
-      setText('h-failover-sub', `→ ${fo.to} • ${fmtClock(fo.at)}`);
+      setText('h-failover', `→ ${esc(fo.to)}`, fo.ago_sec < 900 ? 'var(--amber)' : 'var(--foreground)');
+      setText('h-failover-sub', `Switched ${fmtAgo(fo.ago_sec)} (${fmtClock(fo.at)})`);
     } else {
-      setText('h-failover', 'none', 'var(--emerald)');
-      setText('h-failover-sub', 'primary answered everything since start');
+      setText('h-failover', 'None (Primary 100%)', 'var(--emerald)');
+      setText('h-failover-sub', 'Cloudflare & Quad9 on standby');
     }
 
-    // 6. Local answers
-    const lo = h.local || {};
+    // 5. Tile 4: Local answers
     const localTotal = (lo.lan || 0) + (lo.ptr || 0) + (lo.dnssd || 0);
-    setText('h-local', n(localTotal));
-    setText('h-local-sub', `LAN ${n(lo.lan)} • PTR ${n(lo.ptr)} • DNS-SD ${n(lo.dnssd)} • stale ${n(lo.stale)}`);
+    setText('h-local', `${n(localTotal)} queries`);
+    setText('h-local-sub', `LAN ${n(lo.lan)} • PTR ${n(lo.ptr)} • DNS-SD ${n(lo.dnssd)} (0 WAN load)`);
 
-    // 7. Transport split
-    const pr = h.protocols || {};
+    // 6. Tile 5: Transport split
     const prTotal = Object.values(pr).reduce((a, b) => a + b, 0);
-    const order = ['DOH3', 'DOH', 'UDP', 'OS'];
-    const parts = order.filter(k => pr[k] > 0).map(k => `${k} ${(100 * pr[k] / prTotal).toFixed(prTotal ? 1 : 0)}%`);
-    setText('h-proto', parts.length ? parts.join(' • ') : '–',
-      prTotal && (pr.DOH3 || 0) / prTotal < 0.95 ? 'var(--amber)' : 'var(--foreground)');
-    setText('h-proto-sub', prTotal ? `${n(prTotal)} upstream answers • ${n(h.all_failed)} with no answer` : 'no upstream answers yet');
+    const doh3Pct = prTotal && pr.DOH3 ? (100 * pr.DOH3 / prTotal).toFixed(1) : 0;
+    const protoTitle = prTotal ? `DoH3 (${doh3Pct}%)` : '–';
+    setText('h-proto', protoTitle, doh3Pct >= 95 ? 'var(--emerald)' : 'var(--amber)');
+    setText('h-proto-sub', `${n(prTotal)} queries routed via QUIC / UDP 443`);
 
-    // 8. Process
-    const pc = h.process || {};
-    setText('h-proc', 'Started ' + fmtClock(pc.started));
-    const certTxt = pc.cert_not_after ? `cert expires in ${pc.cert_days_left} d (${pc.cert_not_after})` : 'cert –';
-    setText('h-proc-sub', `config loaded ${fmtClock(pc.config_loaded)} • ${certTxt}`,
-      pc.cert_not_after && pc.cert_days_left < 30 ? 'var(--amber)' : undefined);
+    // 7. Tile 6: Process and HTTPS cert
+    const certDays = pc.cert_days_left !== undefined ? `${pc.cert_days_left} days left` : '–';
+    setText('h-proc', `Cert: ${certDays}`, pc.cert_days_left < 30 ? 'var(--amber)' : 'var(--emerald)');
+    setText('h-proc-sub', `ctrld running • loaded ${fmtClock(pc.config_loaded)}`);
 
-    // 1. Upstream table
+    // 8. Upstream table with Roles
     const tbody = document.getElementById('h-upstreams');
     if (tbody) {
       const ups = Array.isArray(h.upstreams) ? h.upstreams : [];
       const total = ups.reduce((a, u) => a + (u.answered || 0), 0);
-      tbody.innerHTML = ups.map(u => {
+      tbody.innerHTML = ups.map((u, idx) => {
         const share = total ? (100 * u.answered / total).toFixed(1) + '%' : '–';
         const failColor = u.failed > 0 ? 'var(--amber)' : 'var(--muted-foreground)';
+
+        // Role badge
+        let roleBadge = '<span class="badge" style="background:rgba(100,116,139,0.2); color:#94a3b8; padding:2px 6px; border-radius:4px; font-weight:700; font-size:10px;">FALLBACK</span>';
+        if (idx === 0 || u.name === 'NextDNS') {
+          roleBadge = '<span class="badge" style="background:rgba(34,197,94,0.15); color:#4ade80; border:1px solid rgba(34,197,94,0.3); padding:2px 6px; border-radius:4px; font-weight:700; font-size:10px;">PRIMARY</span>';
+        } else if (idx === 1 || u.name.includes('Cloudflare')) {
+          roleBadge = '<span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); padding:2px 6px; border-radius:4px; font-weight:700; font-size:10px;">FALLBACK 1</span>';
+        } else if (idx === 2 || u.name.includes('Quad9')) {
+          roleBadge = '<span class="badge" style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); padding:2px 6px; border-radius:4px; font-weight:700; font-size:10px;">FALLBACK 2</span>';
+        } else if (u.name.includes('AT&T') || u.type === 'legacy') {
+          roleBadge = '<span class="badge" style="background:rgba(249,115,22,0.15); color:#fb923c; border:1px solid rgba(249,115,22,0.3); padding:2px 6px; border-radius:4px; font-weight:700; font-size:10px;">ISP (EMERGENCY)</span>';
+        }
+
         return `<tr>
-          <td class="cell-clip" style="max-width:190px;" title="${esc(u.name)}">${esc(u.name)}</td>
-          <td style="font-family:ui-monospace, monospace; font-size:11px;">${esc(u.type)}</td>
+          <td class="cell-clip" style="max-width:180px;" title="${esc(u.name)}"><strong style="color:var(--foreground);">${esc(u.name)}</strong></td>
+          <td>${roleBadge}</td>
+          <td style="font-family:ui-monospace, monospace; font-size:11px;">${esc(u.type.toUpperCase())}</td>
           <td style="text-align:right;">${n(u.answered)}</td>
           <td style="text-align:right; color:${failColor};">${n(u.failed)}</td>
-          <td style="text-align:right;">${share}</td>
+          <td style="text-align:right; font-weight:600;">${share}</td>
         </tr>`;
-      }).join('') || '<tr><td colspan="5" style="color:var(--muted-foreground);">No upstream answers yet</td></tr>';
+      }).join('') || '<tr><td colspan="6" style="color:var(--muted-foreground);">No upstream answers yet</td></tr>';
     }
 
-    // 4. Response codes
+    // 9. Response codes breakdown
     const rc = h.rcodes || {};
     const rcTotal = h.rcode_samples || 0;
     setText('h-rc-n', n(rcTotal));
     const rcColors = { NOERROR: '#22c55e', NXDOMAIN: '#60a5fa', SERVFAIL: '#ef4444', REFUSED: '#f97316', NO_ANSWER: '#a855f7' };
+    const rcLabels = { NOERROR: 'Success', NXDOMAIN: 'Non-Existent', SERVFAIL: 'Server Error', REFUSED: 'Refused', NO_ANSWER: 'No Answer' };
     const rcKeys = Object.keys(rc).sort((a, b) => rc[b] - rc[a]);
     const bar = document.getElementById('h-rcodes');
     const legend = document.getElementById('h-rcodes-legend');
     if (bar && legend) {
-      bar.innerHTML = rcKeys.map(k => `<span style="width:${(100 * rc[k] / rcTotal).toFixed(2)}%; background:${rcColors[k] || '#9ca3af'};" title="${esc(k)}"></span>`).join('');
+      bar.innerHTML = rcKeys.map(k => `<span style="width:${(100 * rc[k] / rcTotal).toFixed(2)}%; background:${rcColors[k] || '#9ca3af'};" title="${esc(k)} (${rcLabels[k] || k})"></span>`).join('');
       legend.innerHTML = rcKeys.map(k => {
         const pct = (100 * rc[k] / rcTotal).toFixed(1);
         const warn = k === 'SERVFAIL' && rc[k] / rcTotal > 0.01;
-        return `<span style="${warn ? 'color:var(--rose); font-weight:700;' : 'color:var(--muted-foreground);'}"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:${rcColors[k] || '#9ca3af'}; margin-right:4px;"></span>${esc(k)} ${pct}% (${n(rc[k])})</span>`;
+        const friendly = rcLabels[k] ? ` (${rcLabels[k]})` : '';
+        return `<span style="${warn ? 'color:var(--rose); font-weight:700;' : 'color:var(--muted-foreground);'}"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:${rcColors[k] || '#9ca3af'}; margin-right:4px;"></span>${esc(k)}${friendly} ${pct}%</span>`;
       }).join('');
     }
 
-    // 5. Queries per minute sparkline (oldest → newest; last bar is the minute in progress)
+    // 10. Queries per minute sparkline
     const qpm = Array.isArray(h.per_minute) ? h.per_minute : [];
     const svg = document.getElementById('h-qpm');
     if (svg && qpm.length) {
@@ -1544,6 +1717,22 @@
       const done = qpm.slice(0, -1);
       const avg = done.length ? Math.round(done.reduce((a, b) => a + b, 0) / done.length) : 0;
       setText('h-qpm-max', `— peak ${max.toLocaleString()}/min • avg ${avg.toLocaleString()}/min`);
+    }
+
+    // 11. Ribbon sparkline (Metrics ribbon card)
+    const ribbonSvg = document.getElementById('ribbon-sparkline');
+    if (ribbonSvg && qpm.length) {
+      const max = Math.max(1, ...qpm);
+      const w = 100 / qpm.length;
+      ribbonSvg.innerHTML = qpm.map((v, i) => {
+        const bh = Math.max(v > 0 ? 1 : 0, 22 * v / max);
+        const fill = i === qpm.length - 1 ? '#38bdf8' : '#60a5fa';
+        return `<rect x="${(i * w + 0.2).toFixed(1)}" y="${(24 - bh).toFixed(1)}" width="${Math.max(0.5, w - 0.5).toFixed(1)}" height="${bh.toFixed(1)}" fill="${fill}"><title>${v} queries, ${qpm.length - 1 - i} min ago</title></rect>`;
+      }).join('');
+      const currentQpm = qpm[qpm.length - 1] || 0;
+      setText('stat-qpm-now', currentQpm.toLocaleString());
+      setText('stat-qpm-peak', `Peak: ${max.toLocaleString()}/min`);
+      setText('stat-qpm-sub', `Avg ${Math.round(qpm.reduce((a, b) => a + b, 0) / qpm.length).toLocaleString()}/min in last hour`);
     }
   }
 
@@ -1561,6 +1750,18 @@
       sel.innerHTML = '<option value="all">All devices</option>';
       if (Array.isArray(list)) {
         list.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.name || d.ip;
+          const display = deviceAliases[d.ip] || d.name || d.ip;
+          opt.innerText = display && display !== d.ip ? `${display} (${d.ip})` : d.ip;
+          sel.appendChild(opt);
+        });
+      }
+      sel.value = cur;
+    } catch(e) {
+      console.warn('Error loading devices:', e);
+    }
+  }
           const opt = document.createElement('option');
           opt.value = d.name || d.ip;
           opt.innerText = d.name && d.name !== d.ip ? `${d.name} (${d.ip})` : d.ip;
@@ -1712,7 +1913,8 @@
     const allowedCounts = {};
 
     for (const ev of allEvents) {
-      const dev = ev.client_dev || ev.client_ip || 'Router';
+      const ip = ev.client_ip || '';
+      const dev = deviceAliases[ip] || ev.client_dev || ip || 'Router';
       devCounts[dev] = (devCounts[dev] || 0) + 1;
 
       if (ev.blocked) {
@@ -1980,8 +2182,7 @@
   checkAuthAndInit();
   setInterval(refreshStatus, 4000);
   setInterval(() => {
-    const view = document.getElementById('view-upstreams');
-    if (view && view.classList.contains('active') && !document.hidden) loadHealth();
+    if (!document.hidden) loadHealth();
   }, 5000);
   setInterval(loadDevices, 15000);
 

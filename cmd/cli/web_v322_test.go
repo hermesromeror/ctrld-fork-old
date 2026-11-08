@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestWebDeviceAliases(t *testing.T) {
@@ -93,5 +94,38 @@ func TestWebDeviceAliases(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&aliases)
 	if _, ok := aliases["192.168.20.205"]; ok {
 		t.Errorf("alias should be deleted, but still present in %+v", aliases)
+	}
+}
+
+func TestWebUpstreamProbedLatency(t *testing.T) {
+	ws, sid := newHealthTestServer(t)
+
+	// Set a probed latency for upstream "1"
+	setProbedLatency("1", 24.5, time.Now())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams", nil)
+	req.Host = "127.0.0.1"
+	req.AddCookie(&http.Cookie{Name: "ctrld_session", Value: sid})
+	rec := httptest.NewRecorder()
+	ws.server.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/upstreams: want 200, got %d", rec.Code)
+	}
+
+	var upstreams []map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&upstreams); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(upstreams) < 2 {
+		t.Fatalf("expected at least 2 upstreams, got %d", len(upstreams))
+	}
+
+	// Upstream "1" should have probed latency 24.5 and is_probed true
+	u1 := upstreams[1]
+	if lat, ok := u1["latency"].(float64); !ok || lat != 24.5 {
+		t.Errorf("expected upstream 1 latency 24.5, got %v", u1["latency"])
+	}
+	if isProbed, ok := u1["is_probed"].(bool); !ok || !isProbed {
+		t.Errorf("expected is_probed true for upstream 1, got %v", u1["is_probed"])
 	}
 }

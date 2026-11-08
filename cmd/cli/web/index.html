@@ -781,7 +781,6 @@
         <div class="health-tile"><div class="ht-label">🔀 Failover Status</div><div class="ht-value" id="h-failover">–</div><div class="ht-sub" id="h-failover-sub"></div></div>
         <div class="health-tile"><div class="ht-label">🏠 Local LAN Traffic</div><div class="ht-value" id="h-local">–</div><div class="ht-sub" id="h-local-sub"></div></div>
         <div class="health-tile"><div class="ht-label">🔒 WAN Protocol</div><div class="ht-value" id="h-proto" style="font-size:13px;">–</div><div class="ht-sub" id="h-proto-sub"></div></div>
-        <div class="health-tile"><div class="ht-label">📜 HTTPS Cert & Uptime</div><div class="ht-value" id="h-proc" style="font-size:13px;">–</div><div class="ht-sub" id="h-proc-sub"></div></div>
       </div>
 
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:14px; margin-top:12px;">
@@ -1647,12 +1646,7 @@
     setText('h-proto', protoTitle, doh3Pct >= 95 ? 'var(--emerald)' : 'var(--amber)');
     setText('h-proto-sub', `${n(prTotal)} queries routed via QUIC / UDP 443`);
 
-    // 7. Tile 6: Process and HTTPS cert
-    const certDays = pc.cert_days_left !== undefined ? `${pc.cert_days_left} days left` : '–';
-    setText('h-proc', `Cert: ${certDays}`, pc.cert_days_left < 30 ? 'var(--amber)' : 'var(--emerald)');
-    setText('h-proc-sub', `ctrld running • loaded ${fmtClock(pc.config_loaded)}`);
-
-    // 8. Upstream table with Roles
+    // Upstream table with Roles
     const tbody = document.getElementById('h-upstreams');
     if (tbody) {
       const ups = Array.isArray(h.upstreams) ? h.upstreams : [];

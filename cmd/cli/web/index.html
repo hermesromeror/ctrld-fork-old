@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ctrld Manager • Firewalla Gold</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f172a'/><path d='M16 4 L26 8 V16 C26 22 21 26.5 16 28 C11 26.5 6 22 6 16 V8 Z' fill='%232563eb' stroke='%2360a5fa' stroke-width='1.5'/><path d='M17 9 L11 17 H16 L15 23 L21 15 H16 Z' fill='%23fbbf24'/></svg>">
+  <link rel="icon" type="image/svg+xml" href="/favicon.ico">
+  <link rel="alternate icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzBmMTcyYSIvPjxwYXRoIGQ9Ik0xNiA0IEwyNiA4IFYxNiBDMjYgMjIgMjEgMjYuNSAxNiAyOCBDMTEgMjYuNSA2IDIyIDYgMTYgVjggWiIgZmlsbD0iIzI1NjNlYiIgc3Ryb2tlPSIjNjBhNWZhIiBzdHJva2Utd2lkdGg9IjEuNSIvPjxwYXRoIGQ9Ik0xNyA5IEwxMSAxNyBIMTYgTDE1IDIzIEwyMSAxNSAIMTYgWiIgZmlsbD0iI2ZiYmYyNCIvPjwvc3ZnPg==">
   <style>
     :root {
       --bg: #0b0f19;
@@ -785,7 +786,10 @@
             <div style="font-size:11px; color:var(--muted-foreground);">Measured directly from Firewalla Gold WAN (AT&amp;T Fiber route)</div>
           </div>
         </div>
-        <div id="pop-compare-time" style="font-size:11px; color:var(--muted-foreground); font-family:ui-monospace, monospace;"></div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div id="pop-compare-time" style="font-size:11px; color:var(--muted-foreground); font-family:ui-monospace, monospace;"></div>
+          <button onclick="closePopCompare()" title="Close" style="background:transparent; border:none; color:var(--muted-foreground); font-size:16px; cursor:pointer; padding:2px 6px; border-radius:4px; line-height:1;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--muted-foreground)'">✕</button>
+        </div>
       </div>
       <div id="pop-compare-body"></div>
     </div>
@@ -796,7 +800,10 @@
         <span style="font-size:12px; font-weight:700; color:#93c5fd; display:flex; align-items:center; gap:6px;">
           <span>🌐</span> NextDNS Official Diagnostic (<code>test.nextdns.io</code>)
         </span>
-        <span id="nextdns-diag-time" style="font-size:11px; color:var(--muted-foreground);"></span>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span id="nextdns-diag-time" style="font-size:11px; color:var(--muted-foreground);"></span>
+          <button onclick="closeNextDnsDiag()" title="Close" style="background:transparent; border:none; color:var(--muted-foreground); font-size:16px; cursor:pointer; padding:2px 6px; border-radius:4px; line-height:1;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--muted-foreground)'">✕</button>
+        </div>
       </div>
       <div id="nextdns-diag-body" style="font-size:12px;"></div>
     </div>
@@ -2032,18 +2039,31 @@
     showToast(`Exported ${allEvents.length} queries to CSV`);
   }
 
+  let nextDnsDiagRunning = false;
+
+  function closeNextDnsDiag() {
+    const card = document.getElementById('nextdns-diag-card');
+    if (card) card.style.display = 'none';
+  }
+
   async function runNextDnsDiag() {
     const btn = document.getElementById('btn-nextdns-diag');
     const card = document.getElementById('nextdns-diag-card');
     const body = document.getElementById('nextdns-diag-body');
     const timeEl = document.getElementById('nextdns-diag-time');
 
+    if (card.style.display !== 'none' && !nextDnsDiagRunning) {
+      card.style.display = 'none';
+      return;
+    }
+
+    nextDnsDiagRunning = true;
     if (btn) {
       btn.disabled = true;
       btn.innerHTML = '<span>⏳ Testing test.nextdns.io...</span>';
     }
     card.style.display = 'block';
-    body.innerHTML = '<span style="color:var(--muted-foreground);">Querying https://test.nextdns.io from Firewalla Gold...</span>';
+    body.innerHTML = '<span style="color:var(--muted-foreground);"><span class="pulse-dot"></span> Querying https://test.nextdns.io from Firewalla Gold...</span>';
 
     try {
       const res = await fetch('/api/nextdns-diag');
@@ -2093,11 +2113,19 @@
     } catch(err) {
       body.innerHTML = `<div style="color:#f87171;">Diagnostic request failed: ${esc(err.message)}</div>`;
     } finally {
+      nextDnsDiagRunning = false;
       if (btn) {
         btn.disabled = false;
         btn.innerHTML = '<span>⚡</span> Run NextDNS Live Diagnostic';
       }
     }
+  }
+
+  let popCompareRunning = false;
+
+  function closePopCompare() {
+    const card = document.getElementById('pop-compare-card');
+    if (card) card.style.display = 'none';
   }
 
   async function runPopCompare() {
@@ -2106,17 +2134,28 @@
     const body = document.getElementById('pop-compare-body');
     const timeEl = document.getElementById('pop-compare-time');
 
+    if (card.style.display !== 'none' && !popCompareRunning) {
+      card.style.display = 'none';
+      return;
+    }
+
+    popCompareRunning = true;
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = '<span>⏳</span> Testing live traceroute & hops...';
+      btn.innerHTML = '<span>⏳</span> Sampling 15 connections per PoP...';
     }
     card.style.display = 'block';
-    body.innerHTML = '<div style="padding:16px; text-align:center; color:var(--muted-foreground);"><span class="pulse-dot"></span> Measuring live latency, traceroute forward hops, and TTL return hops from Firewalla Gold WAN...</div>';
+    body.innerHTML = '<div style="padding:16px; text-align:center; color:var(--muted-foreground);"><span class="pulse-dot"></span> Measuring 15 concurrent HTTP/DoH connections without keep-alives, traceroute, and raw TTL from Firewalla Gold WAN...</div>';
 
     try {
       const res = await fetch('/api/nextdns-pop-compare');
       if (res.status === 401) {
         showLogin();
+        return;
+      }
+      if (res.status === 429) {
+        const errData = await res.json().catch(() => ({}));
+        body.innerHTML = `<div style="color:var(--amber); padding:10px; text-align:center;">⏳ ${esc(errData.message || 'Prueba en curso o cooldown activo. Por favor espera unos segundos.')}</div>`;
         return;
       }
       const data = await res.json();
@@ -2125,23 +2164,23 @@
       const a = data.anexia || {};
       const v = data.vultr || {};
 
-      const renderPoPCol = (p, isPrimary) => {
-        const borderStyle = isPrimary ? 'border:1px solid rgba(16, 185, 129, 0.4); background:rgba(15,23,42,0.8);' : 'border:1px solid var(--card-border); background:rgba(15,23,42,0.6);';
+      const renderPoPCol = (p) => {
+        const isPrimary = !!p.in_use;
+        const borderStyle = isPrimary ? 'border:1px solid rgba(16, 185, 129, 0.4); background:rgba(15,23,42,0.85);' : 'border:1px solid var(--card-border); background:rgba(15,23,42,0.6);';
         const badge = isPrimary
           ? `<span style="display:flex; align-items:center; gap:4px; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); color:var(--emerald); font-size:10px; font-weight:700; padding:2px 8px; border-radius:12px; text-transform:uppercase;"><span class="pulse-dot" style="background:var(--emerald);"></span> In Use</span>`
           : `<span style="background:rgba(255,255,255,0.06); color:var(--muted-foreground); font-size:10px; font-weight:700; padding:2px 8px; border-radius:12px; text-transform:uppercase;">Standby</span>`;
 
-        const pingDisplay = p.ping_ms > 0 ? `${p.ping_ms} ms` : '–';
+        const medDisplay = p.median_ms > 0 ? `${p.median_ms} ms` : (p.tcp_443_ms > 0 ? `${p.tcp_443_ms} ms` : '–');
+        const p90Display = p.p90_ms > 0 ? `${p.p90_ms} ms` : '–';
+        const slowDisplay = p.sample_count > 0 ? `${p.slow_count} / ${p.sample_count} (${p.slow_pct}%)` : '–';
+        const fwdHops = p.forward_hops > 0 ? `${p.forward_hops} saltos` : '–';
+        const retTTL = p.return_ttl > 0 ? `TTL: ${p.return_ttl}` : '–';
         const tcpDisplay = p.tcp_443_ms > 0 ? `${p.tcp_443_ms} ms` : '–';
         const dnsDisplay = p.dns_resolve_ms > 0 ? `${p.dns_resolve_ms} ms` : '–';
-        const fwdHops = p.forward_hops > 0 ? `${p.forward_hops} saltos` : '–';
-        const retHops = p.return_hops > 0 ? `${p.return_hops} saltos` : '–';
-        const retSub = p.return_ttl > 0 ? `TTL recibido: ${p.return_ttl}` : 'Sin datos TTL';
 
-        const fwdSub = isPrimary ? 'Ruta directa Arelion' : '+4 saltos (Desvío BGP)';
-        const routeNote = isPrimary
-          ? '<span style="color:var(--emerald); font-weight:700;">✔ Ruta Óptima:</span> Peering directo local en Atlanta sin desvíos.'
-          : '<span style="color:var(--amber); font-weight:700;">ℹ Desvío BGP:</span> En el salto 9 añade +25 ms de latencia física.';
+        const p90Color = p.p90_ms > 20 ? 'var(--amber)' : (isPrimary ? 'var(--emerald)' : 'var(--foreground)');
+        const slowColor = p.slow_pct > 15 ? 'var(--amber)' : (isPrimary ? 'var(--emerald)' : 'var(--foreground)');
 
         return `
           <div style="${borderStyle} border-radius:8px; padding:12px; display:flex; flex-direction:column; justify-content:space-between;">
@@ -2157,39 +2196,38 @@
                 ${badge}
               </div>
 
-              <!-- Primary Metrics -->
+              <!-- 15-Connection Statistical Metrics -->
               <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); text-align:center;">
                 <div style="background:rgba(255,255,255,0.03); padding:6px 4px; border-radius:4px;">
-                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">Ping (RTT)</span>
-                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : (p.ping_ms > 20 ? 'var(--amber)' : 'var(--foreground)')};">${esc(pingDisplay)}</span>
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">Mediana (RTT)</span>
+                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : 'var(--foreground)'}; font-family:ui-monospace, monospace;">${esc(medDisplay)}</span>
                 </div>
                 <div style="background:rgba(255,255,255,0.03); padding:6px 4px; border-radius:4px;">
-                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">TCP 443</span>
-                  <span style="font-size:13px; font-weight:700; color:var(--foreground);">${esc(tcpDisplay)}</span>
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">Percentil 90</span>
+                  <span style="font-size:13px; font-weight:700; color:${p90Color}; font-family:ui-monospace, monospace;">${esc(p90Display)}</span>
                 </div>
                 <div style="background:rgba(255,255,255,0.03); padding:6px 4px; border-radius:4px;">
-                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">DNS Resolve</span>
-                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : 'var(--foreground)'};">${esc(dnsDisplay)}</span>
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">Lentas (&gt;20ms)</span>
+                  <span style="font-size:13px; font-weight:700; color:${slowColor}; font-family:ui-monospace, monospace;">${esc(slowDisplay)}</span>
                 </div>
               </div>
 
-              <!-- Hops Breakdown -->
+              <!-- Network Probes: Raw TTL & Forward Hops -->
               <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin-top:8px; text-align:center;">
                 <div style="background:${isPrimary ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)'}; border:1px solid ${isPrimary ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}; padding:6px 4px; border-radius:4px;">
-                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">➡️ Saltos para Llegar</span>
-                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : 'var(--amber)'};">${esc(fwdHops)}</span>
-                  <span style="font-size:10px; color:var(--muted-foreground); display:block; margin-top:2px;">${esc(fwdSub)}</span>
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">➡️ Saltos de Ida</span>
+                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : 'var(--amber)'}; font-family:ui-monospace, monospace;">${esc(fwdHops)}</span>
                 </div>
                 <div style="background:${isPrimary ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)'}; border:1px solid ${isPrimary ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}; padding:6px 4px; border-radius:4px;">
-                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">⬅️ Saltos para Volver</span>
-                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : 'var(--foreground)'};">${esc(retHops)}</span>
-                  <span style="font-size:10px; color:var(--muted-foreground); display:block; margin-top:2px;">${esc(retSub)}</span>
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">⬅️ TTL Recibido (Raw)</span>
+                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : 'var(--foreground)'}; font-family:ui-monospace, monospace;">${esc(retTTL)}</span>
                 </div>
               </div>
             </div>
 
-            <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); font-size:11px; color:var(--muted-foreground);">
-              ${routeNote}
+            <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); font-size:11px; color:var(--muted-foreground); display:flex; justify-content:space-between; font-family:ui-monospace, monospace;">
+              <span>TCP 443: <strong style="color:var(--foreground);">${esc(tcpDisplay)}</strong></span>
+              <span>DNS UDP: <strong style="color:var(--foreground);">${esc(dnsDisplay)}</strong></span>
             </div>
           </div>
         `;
@@ -2197,8 +2235,8 @@
 
       body.innerHTML = `
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin-bottom:12px;">
-          ${renderPoPCol(a, true)}
-          ${renderPoPCol(v, false)}
+          ${renderPoPCol(a)}
+          ${renderPoPCol(v)}
         </div>
 
         <div style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:8px; padding:10px 12px; font-size:12px; display:flex; gap:10px; align-items:flex-start;">
@@ -2208,7 +2246,7 @@
               Veredicto de Ruta: ${esc(data.verdict || '')}
             </div>
             <div style="color:var(--foreground); font-size:11px; line-height:1.5;">
-              <strong>¿Cuándo deberías cambiarlo a Vultr?</strong> ${esc(data.action_advice || '')}
+              <strong>Criterio de cambio:</strong> ${esc(data.action_advice || '')}
             </div>
           </div>
         </div>
@@ -2216,6 +2254,7 @@
     } catch(err) {
       body.innerHTML = `<div style="color:#f87171; padding:8px 0;">Error running PoP comparison: ${esc(err.message)}</div>`;
     } finally {
+      popCompareRunning = false;
       if (btn) {
         btn.disabled = false;
         btn.innerHTML = '<span>⚖️</span> Compare PoPs (Anexia vs Vultr)';

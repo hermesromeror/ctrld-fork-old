@@ -500,6 +500,7 @@ func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 			"/login":          true,
 			"/api/login":      true,
 			"/api/auth-check": true,
+			"/favicon.ico":    true,
 		}
 
 		if !publicEndpoints[r.URL.Path] {
@@ -518,6 +519,8 @@ func (ws *webServer) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#0f172a"/><path d="M16 4 L26 8 V16 C26 22 21 26.5 16 28 C11 26.5 6 22 6 16 V8 Z" fill="#2563eb" stroke="#60a5fa" stroke-width="1.5"/><path d="M17 9 L11 17 H16 L15 23 L21 15 H16 Z" fill="#fbbf24"/></svg>`
+
 func (ws *webServer) registerRoutes() {
 	// Root and /login: Web UI SPA
 	ws.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -528,6 +531,13 @@ func (ws *webServer) registerRoutes() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		_, _ = w.Write(webIndexHTML)
+	})
+
+	// GET /favicon.ico (Public SVG favicon)
+	ws.mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write([]byte(faviconSVG))
 	})
 
 	// GET /api/auth-check
@@ -1103,8 +1113,8 @@ func (ws *webServer) registerRoutes() {
 				http.Error(w, `{"status":"error","message":"Invalid IP address"}`, http.StatusBadRequest)
 				return
 			}
-			for _, r := range alias {
-				if unicode.IsControl(r) {
+			for _, ch := range alias {
+				if unicode.IsControl(ch) {
 					http.Error(w, `{"status":"error","message":"Control characters not allowed"}`, http.StatusBadRequest)
 					return
 				}

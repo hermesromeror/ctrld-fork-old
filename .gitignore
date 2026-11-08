@@ -19,3 +19,8 @@ ctrld.exe
 /SPEC.md
 /tasks/
 /SPEC-*.md
+
+# Private administration & ops documentation - never commit to public repo
+/GUIA_ADMINISTRACION.md
+/ops/
+

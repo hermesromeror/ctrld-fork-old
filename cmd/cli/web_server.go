@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Control-D-Inc/ctrld"
 	"github.com/miekg/dns"
@@ -950,6 +951,8 @@ func (ws *webServer) registerRoutes() {
 			Role        string  `json:"role"`
 			Latency     float64 `json:"latency"`
 			IsProbed    bool    `json:"is_probed"`
+			ProbedAge   string  `json:"probed_age,omitempty"`
+			ProbeFailed bool    `json:"probe_failed,omitempty"`
 		}
 		var list []UpstreamInfo
 		if ws.p.cfg != nil {
@@ -982,10 +985,25 @@ func (ws *webServer) registerRoutes() {
 				}
 				lat := math.Round(ws.p.getUpstreamLatency(k)*10) / 10
 				isProbed := false
+				probedAge := ""
+				probeFailed := false
 				if lat == 0 {
-					if pLat, _ := getProbedLatency(k); pLat > 0 {
-						lat = pLat
-						isProbed = true
+					pLat, pAt := getProbedLatency(k)
+					if pLat < 0 {
+						probeFailed = true
+					} else if pLat > 0 && !pAt.IsZero() {
+						age := time.Since(pAt)
+						if age <= 2*time.Hour {
+							lat = pLat
+							isProbed = true
+							if age < 2*time.Minute {
+								probedAge = "just now"
+							} else if age < 60*time.Minute {
+								probedAge = fmt.Sprintf("%dm ago", int(age.Minutes()))
+							} else {
+								probedAge = fmt.Sprintf("%dh ago", int(age.Hours()))
+							}
+						}
 					}
 				}
 				list = append(list, UpstreamInfo{
@@ -1000,6 +1018,8 @@ func (ws *webServer) registerRoutes() {
 					Role:        role,
 					Latency:     lat,
 					IsProbed:    isProbed,
+					ProbedAge:   probedAge,
+					ProbeFailed: probeFailed,
 				})
 			}
 		}
@@ -1068,6 +1088,7 @@ func (ws *webServer) registerRoutes() {
 			return
 		}
 		if r.Method == http.MethodPost {
+			r.Body = http.MaxBytesReader(w, r.Body, 4096)
 			var body struct {
 				IP    string `json:"ip"`
 				Alias string `json:"alias"`
@@ -1082,13 +1103,26 @@ func (ws *webServer) registerRoutes() {
 				http.Error(w, `{"status":"error","message":"Invalid IP address"}`, http.StatusBadRequest)
 				return
 			}
-			if len(alias) > 40 {
-				alias = alias[:40]
+			for _, r := range alias {
+				if unicode.IsControl(r) {
+					http.Error(w, `{"status":"error","message":"Control characters not allowed"}`, http.StatusBadRequest)
+					return
+				}
+			}
+			runes := []rune(alias)
+			if len(runes) > 40 {
+				alias = string(runes[:40])
 			}
 			aliases := ws.loadDeviceAliases()
 			if alias == "" {
 				delete(aliases, ip)
 			} else {
+				if len(aliases) >= 512 {
+					if _, exists := aliases[ip]; !exists {
+						http.Error(w, `{"status":"error","message":"Maximum aliases limit reached (512)"}`, http.StatusBadRequest)
+						return
+					}
+				}
 				aliases[ip] = alias
 			}
 			if err := ws.saveDeviceAliases(aliases); err != nil {
@@ -1301,6 +1335,9 @@ func (ws *webServer) registerRoutes() {
 
 		_ = json.NewEncoder(w).Encode(resMap)
 	})
+
+	// GET /api/nextdns-pop-compare
+	ws.mux.HandleFunc("/api/nextdns-pop-compare", ws.handleNextDNSPoPCompare)
 }
 
 // readTailLines reads up to maxLines from the end of the specified file, seeking up to 256KB from the end
@@ -1627,6 +1664,8 @@ func (p *prog) startStandbyProber(ctx context.Context) {
 				lat, err := probeStandbyUpstream(ctx, uc)
 				if err == nil && lat > 0 {
 					setProbedLatency(k, lat, time.Now())
+				} else {
+					setProbedLatency(k, -1, time.Now())
 				}
 			}
 		}

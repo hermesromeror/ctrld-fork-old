@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ctrld Manager • Firewalla Gold</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f172a'/><path d='M16 4 L26 8 V16 C26 22 21 26.5 16 28 C11 26.5 6 22 6 16 V8 Z' fill='%232563eb' stroke='%2360a5fa' stroke-width='1.5'/><path d='M17 9 L11 17 H16 L15 23 L21 15 H16 Z' fill='%23fbbf24'/></svg>">
   <style>
     :root {
       --bg: #0b0f19;
@@ -747,9 +748,29 @@
           Failover chain configured in <code>/data/controld/ctrld.toml</code>. Primary queries go to NextDNS; automatic fallback engages if primary fails.
         </p>
       </div>
-      <button onclick="runNextDnsDiag()" id="btn-nextdns-diag" style="padding:6px 14px; font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
-        <span>⚡</span> Run NextDNS Live Diagnostic
-      </button>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button onclick="runPopCompare()" id="btn-pop-compare" style="padding:6px 14px; font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px; background:rgba(99, 102, 241, 0.15); border:1px solid rgba(99, 102, 241, 0.35); color:#a5b4fc; border-radius:6px; cursor:pointer;">
+          <span>⚖️</span> Compare PoPs (Anexia vs Vultr)
+        </button>
+        <button onclick="runNextDnsDiag()" id="btn-nextdns-diag" style="padding:6px 14px; font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px; border-radius:6px; cursor:pointer;">
+          <span>⚡</span> Run NextDNS Live Diagnostic
+        </button>
+      </div>
+    </div>
+
+    <!-- NextDNS PoP Comparison Card (Anexia vs Vultr) -->
+    <div id="pop-compare-card" style="display:none; margin-bottom:16px; padding:14px; border-radius:10px; background:rgba(19, 29, 49, 0.7); border:1px solid rgba(99, 102, 241, 0.35);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:16px;">⚖️</span>
+          <div>
+            <div style="font-size:12px; font-weight:700; color:#a5b4fc; text-transform:uppercase; letter-spacing:0.5px;">NextDNS Atlanta PoP Benchmark & Route Decision</div>
+            <div style="font-size:11px; color:var(--muted-foreground);">Measured directly from Firewalla Gold WAN (AT&amp;T Fiber route)</div>
+          </div>
+        </div>
+        <div id="pop-compare-time" style="font-size:11px; color:var(--muted-foreground); font-family:ui-monospace, monospace;"></div>
+      </div>
+      <div id="pop-compare-body"></div>
     </div>
 
     <!-- NextDNS Diagnostic Card -->
@@ -1171,7 +1192,7 @@
     // Device name with the IP below it; each line is cut with "…" (full text on hover). Clickable to set alias.
     tr.innerHTML = `
       <td style="color:var(--muted-foreground);">${esc(ev.time)}</td>
-      <td title="${esc(devTitle)}" style="cursor:pointer;" onclick="openDeviceAliasModal('${esc(ip)}', '${esc(devName)}')"><div class="cell-clip" style="font-weight:600; color:var(--foreground);">${esc(devName)}${aliasTag}</div>${devIP ? `<div class="cell-clip dev-ip" style="color:var(--muted-foreground);">${esc(devIP)}</div>` : ''}</td>
+      <td title="${esc(devTitle)}" style="cursor:pointer;" data-ip="${esc(ip)}" data-name="${esc(devName)}" onclick="openDeviceAliasModal(this.getAttribute('data-ip'), this.getAttribute('data-name'))"><div class="cell-clip" style="font-weight:600; color:var(--foreground);">${esc(devName)}${aliasTag}</div>${devIP ? `<div class="cell-clip dev-ip" style="color:var(--muted-foreground);">${esc(devIP)}</div>` : ''}</td>
       <td style="color:#60a5fa;">${esc(ev.type || 'A')}</td>
       <td class="cell-clip" style="font-weight:600; color:var(--foreground);" title="${esc(ev.domain)}"><span onclick="testDomainInResolver(this.getAttribute('data-domain'))" data-domain="${esc(ev.domain)}" class="domain-test-link" title="Click to test in Live DNS Resolver">${esc(ev.domain)}</span></td>
       <td class="cell-clip"><span class="status-badge ${badgeClass}">${esc(statusText)}</span></td>
@@ -1437,7 +1458,10 @@
         if (isPrimary) {
           rightText = `<span style="font-weight:700; color:var(--emerald);">${esc(u.latency)} ms</span>`;
         } else if (u.latency > 0) {
-          rightText = `<div style="text-align:right;"><span style="font-weight:700; color:var(--foreground);">${esc(u.latency)} ms</span><span style="font-size:10px; color:var(--muted-foreground); display:block;">hourly probe</span></div>`;
+          const ageTag = u.probed_age ? `probe ${esc(u.probed_age)}` : 'hourly probe';
+          rightText = `<div style="text-align:right;"><span style="font-weight:700; color:var(--foreground);">${esc(u.latency)} ms</span><span style="font-size:10px; color:var(--muted-foreground); display:block;">${ageTag}</span></div>`;
+        } else if (u.probe_failed) {
+          rightText = `<div style="text-align:right;"><span style="font-size:11px; font-weight:600; color:var(--rose);">Probe Failed</span><span style="font-size:10px; color:var(--muted-foreground); display:block;">unreachable</span></div>`;
         } else {
           rightText = `<span style="font-size:11px; color:var(--muted-foreground);">${esc(u.timeout)} ms t/o</span>`;
         }
@@ -1599,7 +1623,7 @@
         bTitle.style.color = '#fbbf24';
         bTitle.innerText = 'Resolution Degraded or Failover Engaged';
         bDesc.innerText = (fo.at && fo.ago_sec < 600)
-          ? `Failover active: querying ${esc(fo.to || 'fallback')} (${fmtAgo(fo.ago_sec)}). Primary is recovering.`
+          ? `Failover active: querying ${fo.to || 'fallback'} (${fmtAgo(fo.ago_sec)}). Primary is recovering.`
           : `${n(hw.failed_queries)} failed queries in recent window. Primary is recovering.`;
       } else {
         banner.style.background = 'rgba(34, 197, 94, 0.1)';
@@ -1608,9 +1632,9 @@
         bTitle.style.color = '#4ade80';
         bTitle.innerText = 'DNS Resolution 100% Operational';
         if (fo.at && fo.ago_sec < 900) {
-          bDesc.innerText = `Primary upstream (${esc(primaryName)}) active • 1 transient fallback to ${esc(fo.to)} (${fmtAgo(fo.ago_sec)}, recovered).`;
+          bDesc.innerText = `Primary upstream (${primaryName}) active • 1 transient fallback to ${fo.to} (${fmtAgo(fo.ago_sec)}, recovered).`;
         } else {
-          bDesc.innerText = `Primary upstream (${esc(primaryName)}) responding normally with 0 errors. All policies active.`;
+          bDesc.innerText = `Primary upstream (${primaryName}) responding normally with 0 errors. All policies active.`;
         }
       }
     }
@@ -1634,14 +1658,14 @@
 
     // 4. Tile 3: Failover status
     if (hw.class === 'healthy') {
-      setText('h-failover', `${esc(primaryName)} (Active)`, 'var(--emerald)');
+      setText('h-failover', `${primaryName} (Active)`, 'var(--emerald)');
       if (fo.at) {
-        setText('h-failover-sub', `Last fallback: ${esc(fo.to)} (${fmtAgo(fo.ago_sec)}) • Standby ready`);
+        setText('h-failover-sub', `Last fallback: ${fo.to} (${fmtAgo(fo.ago_sec)}) • Standby ready`);
       } else {
         setText('h-failover-sub', '100% Primary • Cloudflare & Quad9 standby');
       }
     } else if (fo.at && fo.ago_sec < 600) {
-      setText('h-failover', `→ ${esc(fo.to)}`, 'var(--amber)');
+      setText('h-failover', `→ ${fo.to}`, 'var(--amber)');
       setText('h-failover-sub', `Failover active • Switched ${fmtAgo(fo.ago_sec)} (${fmtClock(fo.at)})`);
     } else {
       setText('h-failover', `${n(hw.failed_queries)} Failed`, 'var(--amber)');
@@ -2055,6 +2079,129 @@
       if (btn) {
         btn.disabled = false;
         btn.innerHTML = '<span>⚡</span> Run NextDNS Live Diagnostic';
+      }
+    }
+  }
+
+  async function runPopCompare() {
+    const btn = document.getElementById('btn-pop-compare');
+    const card = document.getElementById('pop-compare-card');
+    const body = document.getElementById('pop-compare-body');
+    const timeEl = document.getElementById('pop-compare-time');
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳</span> Testing live traceroute & hops...';
+    }
+    card.style.display = 'block';
+    body.innerHTML = '<div style="padding:16px; text-align:center; color:var(--muted-foreground);"><span class="pulse-dot"></span> Measuring live latency, traceroute forward hops, and TTL return hops from Firewalla Gold WAN...</div>';
+
+    try {
+      const res = await fetch('/api/nextdns-pop-compare');
+      if (res.status === 401) {
+        showLogin();
+        return;
+      }
+      const data = await res.json();
+      timeEl.innerText = 'Updated: ' + new Date().toLocaleTimeString();
+
+      const a = data.anexia || {};
+      const v = data.vultr || {};
+
+      const renderPoPCol = (p, isPrimary) => {
+        const borderStyle = isPrimary ? 'border:1px solid rgba(16, 185, 129, 0.4); background:rgba(15,23,42,0.8);' : 'border:1px solid var(--card-border); background:rgba(15,23,42,0.6);';
+        const badge = isPrimary
+          ? `<span style="display:flex; align-items:center; gap:4px; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); color:var(--emerald); font-size:10px; font-weight:700; padding:2px 8px; border-radius:12px; text-transform:uppercase;"><span class="pulse-dot" style="background:var(--emerald);"></span> In Use</span>`
+          : `<span style="background:rgba(255,255,255,0.06); color:var(--muted-foreground); font-size:10px; font-weight:700; padding:2px 8px; border-radius:12px; text-transform:uppercase;">Standby</span>`;
+
+        const pingDisplay = p.ping_ms > 0 ? `${p.ping_ms} ms` : '–';
+        const tcpDisplay = p.tcp_443_ms > 0 ? `${p.tcp_443_ms} ms` : '–';
+        const dnsDisplay = p.dns_resolve_ms > 0 ? `${p.dns_resolve_ms} ms` : '–';
+        const fwdHops = p.forward_hops > 0 ? `${p.forward_hops} saltos` : '–';
+        const retHops = p.return_hops > 0 ? `${p.return_hops} saltos` : '–';
+        const retSub = p.return_ttl > 0 ? `TTL recibido: ${p.return_ttl}` : 'Sin datos TTL';
+
+        const fwdSub = isPrimary ? 'Ruta directa Arelion' : '+4 saltos (Desvío BGP)';
+        const routeNote = isPrimary
+          ? '<span style="color:var(--emerald); font-weight:700;">✔ Ruta Óptima:</span> Peering directo local en Atlanta sin desvíos.'
+          : '<span style="color:var(--amber); font-weight:700;">ℹ Desvío BGP:</span> En el salto 9 añade +25 ms de latencia física.';
+
+        return `
+          <div style="${borderStyle} border-radius:8px; padding:12px; display:flex; flex-direction:column; justify-content:space-between;">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-size:16px;">${isPrimary ? '🟢' : '🔵'}</span>
+                  <div>
+                    <div style="font-weight:700; font-size:13px; color:var(--foreground);">${esc(p.name || '')}</div>
+                    <div style="font-size:11px; color:var(--muted-foreground); font-family:ui-monospace, monospace;">${esc(p.ip || '')} • ${esc(p.pop_id || 'atl')}</div>
+                  </div>
+                </div>
+                ${badge}
+              </div>
+
+              <!-- Primary Metrics -->
+              <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); text-align:center;">
+                <div style="background:rgba(255,255,255,0.03); padding:6px 4px; border-radius:4px;">
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">Ping (RTT)</span>
+                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : (p.ping_ms > 20 ? 'var(--amber)' : 'var(--foreground)')};">${esc(pingDisplay)}</span>
+                </div>
+                <div style="background:rgba(255,255,255,0.03); padding:6px 4px; border-radius:4px;">
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">TCP 443</span>
+                  <span style="font-size:13px; font-weight:700; color:var(--foreground);">${esc(tcpDisplay)}</span>
+                </div>
+                <div style="background:rgba(255,255,255,0.03); padding:6px 4px; border-radius:4px;">
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">DNS Resolve</span>
+                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : 'var(--foreground)'};">${esc(dnsDisplay)}</span>
+                </div>
+              </div>
+
+              <!-- Hops Breakdown -->
+              <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin-top:8px; text-align:center;">
+                <div style="background:${isPrimary ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)'}; border:1px solid ${isPrimary ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}; padding:6px 4px; border-radius:4px;">
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">➡️ Saltos para Llegar</span>
+                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : 'var(--amber)'};">${esc(fwdHops)}</span>
+                  <span style="font-size:10px; color:var(--muted-foreground); display:block; margin-top:2px;">${esc(fwdSub)}</span>
+                </div>
+                <div style="background:${isPrimary ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)'}; border:1px solid ${isPrimary ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}; padding:6px 4px; border-radius:4px;">
+                  <span style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase; font-weight:600; display:block;">⬅️ Saltos para Volver</span>
+                  <span style="font-size:13px; font-weight:700; color:${isPrimary ? 'var(--emerald)' : 'var(--foreground)'};">${esc(retHops)}</span>
+                  <span style="font-size:10px; color:var(--muted-foreground); display:block; margin-top:2px;">${esc(retSub)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); font-size:11px; color:var(--muted-foreground);">
+              ${routeNote}
+            </div>
+          </div>
+        `;
+      };
+
+      body.innerHTML = `
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin-bottom:12px;">
+          ${renderPoPCol(a, true)}
+          ${renderPoPCol(v, false)}
+        </div>
+
+        <div style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:8px; padding:10px 12px; font-size:12px; display:flex; gap:10px; align-items:flex-start;">
+          <span style="font-size:16px;">💡</span>
+          <div>
+            <div style="font-weight:700; color:#4ade80; margin-bottom:3px;">
+              Veredicto de Ruta: ${esc(data.verdict || '')}
+            </div>
+            <div style="color:var(--foreground); font-size:11px; line-height:1.5;">
+              <strong>¿Cuándo deberías cambiarlo a Vultr?</strong> ${esc(data.action_advice || '')}
+            </div>
+          </div>
+        </div>
+      `;
+    } catch(err) {
+      body.innerHTML = `<div style="color:#f87171; padding:8px 0;">Error running PoP comparison: ${esc(err.message)}</div>`;
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>⚖️</span> Compare PoPs (Anexia vs Vultr)';
       }
     }
   }

@@ -230,7 +230,7 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 10px;
       margin-bottom: 14px;
     }
@@ -238,7 +238,13 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      min-width: 0;
+    }
+    .filter-group button { white-space: nowrap; }
+    #dev-filter { width: 170px; min-width: 110px; flex-shrink: 1; text-overflow: ellipsis; }
+    @media (max-width: 900px) {
+      .feed-controls, .filter-group { flex-wrap: wrap; }
     }
     .btn-filter {
       padding: 5px 10px;
@@ -299,7 +305,9 @@
       border-radius: 6px;
       font-size: 12px;
       outline: none;
-      width: 200px;
+      width: 190px;
+      min-width: 120px;
+      flex-shrink: 1;
     }
     .search-input:focus { border-color: var(--accent); }
 
@@ -1098,7 +1106,7 @@
     allEvents.unshift(ev);
     if (allEvents.length > 500) allEvents.pop();
 
-    updateTopTalkers();
+    scheduleTopTalkers();
 
     if (isPaused) return;
 
@@ -1499,6 +1507,19 @@
     runDnsTest();
   }
 
+  // Re-render the Top-5 chips at most once per second, and never while the
+  // pointer is over them (a re-render between mousedown and mouseup loses the click).
+  let topTalkersTimer = null;
+  function scheduleTopTalkers() {
+    if (topTalkersTimer) return;
+    topTalkersTimer = setTimeout(() => {
+      topTalkersTimer = null;
+      const bar = document.getElementById('top-talkers-bar');
+      if (bar && bar.matches(':hover')) { scheduleTopTalkers(); return; }
+      updateTopTalkers();
+    }, 1000);
+  }
+
   function updateTopTalkers() {
     const devCounts = {};
     const blockedCounts = {};
@@ -1577,7 +1598,13 @@
     }
 
     const headers = ['Time', 'Client Device', 'Client IP', 'Query Type', 'Domain', 'Status', 'Upstream', 'Latency (ms)', 'Blocked'];
-    const csvEscape = v => '"' + String(v === undefined || v === null ? '' : v).replace(/"/g, '""') + '"';
+    // Domains and device names come from the network (any LAN device can choose them).
+    // Prefix a quote to anything a spreadsheet would treat as a formula (OWASP CSV injection).
+    const csvEscape = v => {
+      let s = String(v === undefined || v === null ? '' : v);
+      if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+      return '"' + s.replace(/"/g, '""') + '"';
+    };
 
     const rows = [headers.join(',')];
     for (const ev of allEvents) {
@@ -1637,15 +1664,15 @@
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-top:6px;">
             <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
               <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">Protocol</div>
-              <div style="font-weight:700; color:#34d399; font-size:13px; margin-top:2px;">${esc(data.protocol || 'DOH3')}</div>
+              <div style="font-weight:700; color:#34d399; font-size:13px; margin-top:2px;">${esc(data.protocol || '-')}</div>
             </div>
             <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
               <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">PoP / Server</div>
-              <div style="font-weight:700; color:#60a5fa; font-size:13px; margin-top:2px;">${esc(data.server || 'anexia-atl-1')}</div>
+              <div style="font-weight:700; color:#60a5fa; font-size:13px; margin-top:2px;">${esc(data.server || '-')}</div>
             </div>
             <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
               <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">Profile ID</div>
-              <div style="font-weight:700; color:var(--foreground); font-family:monospace; font-size:12px; margin-top:2px;">${esc(data.profile || 'Default')}</div>
+              <div style="font-weight:700; color:var(--foreground); font-family:monospace; font-size:12px; margin-top:2px;">${esc(data.profile || '-')}</div>
             </div>
             <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
               <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">Client WAN IP</div>
@@ -1657,14 +1684,14 @@
             </div>
             <div style="background:rgba(15,23,42,0.6); padding:8px 10px; border-radius:6px; border:1px solid var(--card-border);">
               <div style="font-size:10px; color:var(--muted-foreground); text-transform:uppercase;">Device Name</div>
-              <div style="font-weight:700; color:#a855f7; font-size:13px; margin-top:2px;">${esc(data.deviceName || 'Firewalla')}</div>
+              <div style="font-weight:700; color:#a855f7; font-size:13px; margin-top:2px;">${esc(data.deviceName || '-')}</div>
             </div>
           </div>
         `;
       } else {
         body.innerHTML = `
           <div style="color:#f87171; padding:6px 0;">
-            <strong>Diagnostic Error:</strong> ${esc(data.error || 'Failed to connect')}
+            <strong>Diagnostic Error:</strong> ${esc(data.error || ('test.nextdns.io status: ' + (data.status || 'unknown') + ' (queries from the Firewalla are not reaching NextDNS)'))}
           </div>
         `;
       }

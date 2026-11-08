@@ -1130,7 +1130,7 @@ func (ws *webServer) registerRoutes() {
 			})
 			return
 		}
-		req.Header.Set("User-Agent", "curl/7.81.0 ctrld-webui/v3.20")
+		req.Header.Set("User-Agent", "ctrld-webui")
 		req.Header.Set("Accept", "application/json")
 
 		resp, err := client.Do(req)

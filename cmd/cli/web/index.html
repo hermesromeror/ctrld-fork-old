@@ -147,11 +147,21 @@
     /* Metrics Ribbon */
     .metrics-ribbon {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(4, 1fr);
       gap: 12px;
       padding: 16px 20px;
       border-bottom: 1px solid var(--card-border);
       background: rgba(17, 24, 39, 0.6);
+    }
+    @media (max-width: 960px) {
+      .metrics-ribbon {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    @media (max-width: 600px) {
+      .metrics-ribbon {
+        grid-template-columns: 1fr;
+      }
     }
     .metric-card {
       padding: 14px 16px;
@@ -367,6 +377,18 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .upstream-pill {
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      background: rgba(16, 185, 129, 0.08);
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .upstream-pill b { font-family: ui-monospace, monospace; }
     .uptime-pill {
       font-size: 12px;
       color: var(--muted-foreground);
@@ -550,13 +572,20 @@
           <span>ctrld Manager</span>
           <span class="badge-version">
             <span class="pulse-dot"></span>
-            <span id="hdr-version">v3.19-webui</span>
+            <span id="hdr-version">v3.23.1-webui</span>
           </span>
         </div>
         <div class="brand-subtitle">Firewalla Gold (192.168.20.1:5380 HTTPS) • Host: firewalla</div>
       </div>
     </div>
     <div class="header-actions">
+      <div class="upstream-pill" title="Active upstream resolver and latency">
+        <span class="pulse-dot"></span>
+        <span style="color:var(--muted-foreground); font-size:11px; text-transform:uppercase; font-weight:600;">Upstream:</span>
+        <b id="stat-upstream" style="color:var(--foreground);">NextDNS</b>
+        <span class="metric-tag" style="background:var(--emerald-bg); color:var(--emerald); padding:1px 5px; font-size:10px; border-radius:4px; font-weight:700;" id="stat-proto">DoH3</span>
+        <span id="stat-latency" style="color:var(--emerald); font-weight:600; font-family:ui-monospace, monospace;">– ms</span>
+      </div>
       <span class="uptime-pill" title="ctrld process uptime">⏱ Uptime <b id="stat-uptime">–</b></span>
       <button onclick="flushCache()" id="btn-flush">
         <span>🧹</span> Flush Cache
@@ -570,21 +599,9 @@
     </div>
   </header>
 
-  <!-- Metrics Ribbon -->
+  <!-- Metrics Ribbon (4 Cards) -->
   <div class="metrics-ribbon">
-    <!-- Card 1: Upstream Status -->
-    <div class="metric-card">
-      <div class="metric-header">
-        <span>Active Upstream</span>
-        <span class="metric-tag" style="background:var(--emerald-bg); color:var(--emerald);" id="stat-proto">DoH3</span>
-      </div>
-      <div class="metric-value" id="stat-upstream">NextDNS (anexia-atl-1)</div>
-      <div class="metric-footer" style="color:var(--emerald);">
-        <span>●</span> <span id="stat-latency">2.6 ms latency</span>
-      </div>
-    </div>
-
-    <!-- Card 2: Memory Footprint -->
+    <!-- Card 1: Memory Footprint -->
     <div class="metric-card">
       <div class="metric-header">
         <span>Process RSS Memory</span>
@@ -1801,7 +1818,7 @@
         document.getElementById('stat-upstream').innerText = data.active_upstream.name || 'NextDNS';
         document.getElementById('stat-proto').innerText = data.active_upstream.type || 'DoH3';
         if (data.active_upstream.latency) {
-          document.getElementById('stat-latency').innerText = data.active_upstream.latency + ' ms latency';
+          document.getElementById('stat-latency').innerText = data.active_upstream.latency + ' ms';
         }
       }
     } catch(e) {

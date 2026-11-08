@@ -1577,6 +1577,9 @@
     const pr = h.protocols || {};
     const pc = h.process || {};
 
+    const ups = Array.isArray(h.upstreams) ? h.upstreams : [];
+    const primaryName = (ups[0] && ups[0].name) ? ups[0].name : 'NextDNS';
+
     // 1. Unified Status Semaphore Banner
     const banner = document.getElementById('h-status-banner');
     const bIcon = document.getElementById('h-status-icon');
@@ -1591,20 +1594,26 @@
         bTitle.style.color = '#f87171';
         bTitle.innerText = 'DNS Resolution Critical / Upstream Failures Detected';
         bDesc.innerText = `${n(hw.failed_queries)} failed queries in the current 15-minute window. Check WAN connection.`;
-      } else if (hw.class === 'degraded' || (fo.at && fo.ago_sec < 900)) {
+      } else if (hw.class === 'degraded') {
         banner.style.background = 'rgba(245, 158, 11, 0.12)';
         banner.style.borderColor = 'rgba(245, 158, 11, 0.35)';
         bIcon.innerText = '🟡';
         bTitle.style.color = '#fbbf24';
         bTitle.innerText = 'Resolution Degraded or Failover Engaged';
-        bDesc.innerText = `Traffic recently switched to ${esc(fo.to || 'fallback')} (${fmtAgo(fo.ago_sec)}). Primary is recovering.`;
+        bDesc.innerText = (fo.at && fo.ago_sec < 600)
+          ? `Failover active: querying ${esc(fo.to || 'fallback')} (${fmtAgo(fo.ago_sec)}). Primary is recovering.`
+          : `${n(hw.failed_queries)} failed queries in recent window. Primary is recovering.`;
       } else {
         banner.style.background = 'rgba(34, 197, 94, 0.1)';
         banner.style.borderColor = 'rgba(34, 197, 94, 0.3)';
         bIcon.innerText = '🟢';
         bTitle.style.color = '#4ade80';
         bTitle.innerText = 'DNS Resolution 100% Operational';
-        bDesc.innerText = `Primary upstream (NextDNS) responding with 0 errors in the last 15 minutes. All policies active.`;
+        if (fo.at && fo.ago_sec < 900) {
+          bDesc.innerText = `Primary upstream (${esc(primaryName)}) active • 1 transient fallback to ${esc(fo.to)} (${fmtAgo(fo.ago_sec)}, recovered).`;
+        } else {
+          bDesc.innerText = `Primary upstream (${esc(primaryName)}) responding normally with 0 errors. All policies active.`;
+        }
       }
     }
 
@@ -1626,12 +1635,19 @@
     }
 
     // 4. Tile 3: Failover status
-    if (fo.at) {
-      setText('h-failover', `→ ${esc(fo.to)}`, fo.ago_sec < 900 ? 'var(--amber)' : 'var(--foreground)');
-      setText('h-failover-sub', `Switched ${fmtAgo(fo.ago_sec)} (${fmtClock(fo.at)})`);
+    if (hw.class === 'healthy') {
+      setText('h-failover', `${esc(primaryName)} (Active)`, 'var(--emerald)');
+      if (fo.at) {
+        setText('h-failover-sub', `Last fallback: ${esc(fo.to)} (${fmtAgo(fo.ago_sec)}) • Standby ready`);
+      } else {
+        setText('h-failover-sub', '100% Primary • Cloudflare & Quad9 standby');
+      }
+    } else if (fo.at && fo.ago_sec < 600) {
+      setText('h-failover', `→ ${esc(fo.to)}`, 'var(--amber)');
+      setText('h-failover-sub', `Failover active • Switched ${fmtAgo(fo.ago_sec)} (${fmtClock(fo.at)})`);
     } else {
-      setText('h-failover', 'None (Primary 100%)', 'var(--emerald)');
-      setText('h-failover-sub', 'Cloudflare & Quad9 on standby');
+      setText('h-failover', `${n(hw.failed_queries)} Failed`, 'var(--amber)');
+      setText('h-failover-sub', 'Upstream degraded • Primary recovering');
     }
 
     // 5. Tile 4: Local answers
